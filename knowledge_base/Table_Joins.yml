@@ -1,0 +1,150 @@
+# YAML Version Specification
+version: 2
+
+# ----------------------------------------------------------------------------
+# KNOWLEDGE BASE DOCUMENTATION FOR LLM
+# ----------------------------------------------------------------------------
+# This document serves as a semantic layer and comprehensive knowledge base.
+# It details the schemas and logical relationships for three critical tables
+# within the Client Experience data domain. It is intended to be used by an
+# LLM to understand data context, column-level semantics, and the correct
+# methodology for constructing valid and meaningful SQL join queries.
+#
+# The file is structured into two main parts:
+# 1. Models: Detailed definitions of each table, its purpose, granularity,
+#    and key columns.
+# 2. Relationships: Explicit definitions of the join paths between these
+#    models, including the logical reasoning behind each join.
+#
+# Generated on: Thursday, June 19, 2024
+# Author: Gemini Language Model
+# ----------------------------------------------------------------------------
+
+models:
+    # --------------------------------------------------------------------------
+    # MODEL 1: dim_ticket_summary
+    # --------------------------------------------------------------------------
+  - name: client_experience.dim_ticket_summary
+    description: |
+      This is a wide, denormalized dimension table that represents the single source of truth for a support ticket.
+      Each row corresponds to one unique support ticket, identified by 'ticket_id'. It contains a rich set of attributes
+      describing the ticket's entire lifecycle, from creation to resolution, the channels used, the agent(s) involved,
+      categorization tags, and associated client satisfaction (CSAT/CES) scores. It also includes details about the client
+      at the time they created the ticket. This table is the central object for analyzing support volumes, resolution times,
+      and overall ticket-level performance.
+    meta:
+      owner: client_experience_team
+      source_system: Zendesk (Primary), Jira, Internal ML Models
+      update_frequency: Daily
+      granularity: One row per ticket_id
+    columns:
+      - name: ticket_id
+        description: "The unique, numeric primary key for the support ticket. Originates from the Zendesk system. This is the central identifier for joining ticket-related data."
+        tests:
+          - unique
+          - not_null
+      - name: cs_agent_id
+        description: "The unique numeric identifier (bigint) of the CS agent who last solved or is currently assigned to the ticket. This is a crucial foreign key for joining to the agent scorecard. Note the data type requires casting to VARCHAR to join with the scorecard's zendesk_user_id."
+      - name: first_forwarded_cs_agent_id
+        description: "The unique identifier (varchar) of the first agent a ticket was forwarded or transferred to. This is very useful for analyzing escalations and first-touch resolution. This key can be directly joined to the scorecard's zendesk_user_id without casting."
+      - name: requester_identity_canonical_id
+        description: "A unique canonical string identifier for the client who initiated the ticket. This is the master client ID and should be used to join with other models like `prep_chat_messages` to track a client's full journey."
+      - name: ticket_created_at
+        description: "A timestamp recording when the ticket was created. This should be CAST to a DATE to join with daily summary tables like the agent scorecard."
+      - name: first_solved_at
+        description: "A timestamp recording the first time the ticket's status was set to 'solved'. This is a key metric for performance analysis and should be CAST to a DATE for joining with the agent scorecard."
+      - name: channel
+        description: "The channel through which the ticket was created (e.g., 'Chat', 'Email', 'Phone')."
+
+    # --------------------------------------------------------------------------
+    # MODEL 2: dim_cs_agent_scorecard
+    # --------------------------------------------------------------------------
+  - name: dim_cs_agent_scorecard
+    description: |
+      This table is a daily performance summary for each customer service agent. Each row represents one agent's
+      aggregated metrics for a single day ('summary_date'). It includes data on tickets solved, handle times,
+      client satisfaction responses, adherence to schedule, and QA scores. The primary key is a composite of the agent's ID
+      and the summary date. This table is essential for all reporting related to agent efficiency, quality, and productivity.
+    meta:
+      owner: client_experience_team
+      source_system: Zendesk, Playvox, Tymeshift
+      update_frequency: Daily
+      granularity: One row per agent per day
+    columns:
+      - name: zendesk_user_id
+        description: "The unique user identifier for the agent from Zendesk, stored as a string (varchar). This is the primary key component for the agent and is used to join with ticket and chat data."
+        tests:
+          - not_null
+      - name: summary_date
+        description: "The specific date for which the performance metrics are aggregated. This is a timestamp but functions as a date. It is the second component of the composite primary key. It must be joined against other tables by casting their timestamp columns to DATE."
+        tests:
+          - not_null
+      - name: cs_agent
+        description: "The full name of the customer service agent. This can be used as a secondary, less reliable join key but is primarily for display and reporting purposes."
+
+    # --------------------------------------------------------------------------
+    # MODEL 3: prep_chat_messages
+    # --------------------------------------------------------------------------
+  - name: prep_chat_messages
+    description: |
+      This model represents the most granular level of interaction data, with each row corresponding to a single message
+      within a support chat conversation. It stitches together data from two source systems: Decagon (which captures all messages,
+      including those handled purely by AI) and Zendesk (which provides context on the human agent involved). This table is critical
+      for conversational analysis, understanding AI-to-agent handoffs, and analyzing message-level sentiment and timing.
+    meta:
+      owner: data_science_team
+      source_system: Decagon, Zendesk
+      update_frequency: Near Real-time or Hourly
+      granularity: One row per message
+    columns:
+      - name: decagon_conversation_id
+        description: "The unique identifier for the conversation from the Decagon system. Useful for tracing the full AI/agent interaction."
+      - name: zendesk_chat_id
+        description: "The unique identifier for the conversation from the Zendesk Chat system. This often corresponds to a 'ticket_id' in the dim_ticket_summary table, but may require casting from string to bigint."
+      - name: agent_id
+        description: "The unique numeric identifier (integer) for the Zendesk agent who sent the message. This is a foreign key to the agent scorecard but requires casting to VARCHAR to join."
+      - name: identity_canonical_id
+        description: "A unique canonical string identifier for the client. This is the master client ID and is the most reliable way to link chat messages to the client's other tickets in `dim_ticket_summary`."
+      - name: sent_at_et
+        description: "The timestamp (in Eastern Time) when the message was sent. This must be CAST to a DATE to join with the daily agent scorecard."
+
+# ----------------------------------------------------------------------------
+# RELATIONSHIP DEFINITIONS
+# ----------------------------------------------------------------------------
+# This section explicitly defines the logical joins between the models.
+# Each entry describes the purpose of the join and the technical implementation.
+# ----------------------------------------------------------------------------
+relationships:
+  - name: enrich_tickets_with_daily_agent_performance
+    description: |
+      This join connects a ticket from `dim_ticket_summary` to the daily performance scorecard of the agent who solved it.
+      The purpose is to analyze ticket outcomes (like CSAT or resolution time) in the context of the agent's overall performance
+      and workload on that specific day. For example, 'Did tickets solved on a day with high handle time receive lower CSAT scores?'.
+    join_type: left
+    from_model: dim_ticket_summary
+    to_model: dim_cs_agent_scorecard
+    on: |
+      CAST(dim_ticket_summary.cs_agent_id AS VARCHAR) = dim_cs_agent_scorecard.zendesk_user_id
+      AND CAST(dim_ticket_summary.first_solved_at AS DATE) = CAST(dim_cs_agent_scorecard.summary_date AS DATE)
+
+  - name: connect_chat_messages_to_ticket_summary
+    description: |
+      This join links granular chat messages from `prep_chat_messages` to the main ticket record in `dim_ticket_summary`.
+      The most reliable method is using the canonical client ID, which allows for analyzing a user's chat behavior across all their support interactions,
+      even if the chat ID and ticket ID do not align perfectly. This helps answer questions like 'Do clients who use short messages in chat tend to have lower CSAT scores on their tickets?'.
+    join_type: inner
+    from_model: prep_chat_messages
+    to_model: dim_ticket_summary
+    on: prep_chat_messages.identity_canonical_id = dim_ticket_summary.requester_identity_canonical_id
+
+  - name: attribute_chat_messages_to_agent_performance
+    description: |
+      This join connects individual chat messages from an agent to that agent's daily performance scorecard. This is a highly granular join
+      used to analyze agent behavior at the message level. For example, 'What is the average `seconds_since_last_message` for agents
+      on days where their `occupancy_time_chat` is high?'. This requires joining on both the agent ID and the date the message was sent.
+    join_type: left
+    from_model: prep_chat_messages
+    to_model: dim_cs_agent_scorecard
+    on: |
+      CAST(prep_chat_messages.agent_id AS VARCHAR) = dim_cs_agent_scorecard.zendesk_user_id
+      AND CAST(prep_chat_messages.sent_at_et AS DATE) = CAST(dim_cs_agent_scorecard.summary_date AS DATE)
