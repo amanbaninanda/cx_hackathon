@@ -1,0 +1,532 @@
+version: 2
+
+# Business Metrics Configuration
+# This file defines business metrics for analytics and reporting
+# Organized by domain: CS (Customer Support) and Transfers
+
+metrics:
+  # =============================================================================
+  # CUSTOMER SUPPORT (CS) DOMAIN METRICS
+  # =============================================================================
+  
+  # Agent Performance Metrics
+  - name: adherence
+    label: Adherence
+    model: ref('dim_agent_scheduling_daily')
+    description: >
+      Amount of time spent in adherent state relative to productive time.
+      Used to measure agent schedule compliance.
+    type: ratio
+    sql: sum(1.0000 * adherence_productive_time) / nullif({{ metric('scheduled_productive_hours') }}, 0)
+    timestamp: summary_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - agent
+      - team
+    meta:
+      domain: cs
+      category: agent_performance
+
+  - name: scheduled_productive_hours
+    label: Productive Hours
+    model: ref('dim_cs_agent_scorecard')
+    description: Total scheduled productive hours for agents
+    type: sum
+    sql: (1.0/(60*60)) * scheduled_productive_time
+    timestamp: summary_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - agent
+      - team
+    meta:
+      domain: cs
+      category: agent_performance
+
+  - name: occupancy
+    label: Occupancy Rate
+    model: ref('dim_cs_agent_scorecard')
+    description: Proportion of time spent in occupancy state relative to productive scheduled time
+    type: ratio
+    sql: sum(1.0000 * occupancy_productive_time) / nullif(sum(scheduled_productive_time), 0)
+    timestamp: summary_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - agent
+      - team
+    meta:
+      domain: cs
+      category: agent_performance
+
+  # Chat Metrics
+  - name: chat_acceptance_rate
+    label: Chat Acceptance Rate
+    model: ref('dim_cs_agent_scorecard')
+    description: Rate of chats accepted relative to total chats assigned
+    type: ratio
+    sql: sum(1.0000 * accepted_pings_chat) / nullif(sum(1.0000 * assigned_and_accepted_pings_chat), 0)
+    timestamp: summary_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - agent
+      - team
+    meta:
+      domain: cs
+      category: chat_performance
+
+  - name: chat_readiness_rate
+    label: Chat Readiness Rate
+    model: ref('dim_cs_agent_scorecard')
+    description: Proportion of time spent in chat ready state relative to scheduled chat time
+    type: ratio
+    sql: (1.0000 * sum(chat_online_time)) / nullif(sum(scheduled_time_chat), 0)
+    timestamp: summary_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - agent
+      - team
+    meta:
+      domain: cs
+      category: chat_performance
+
+  - name: chat_volume
+    label: Chat Volume
+    model: ref('prep_chat_ticket_interactions')
+    description: Total number of chats created
+    type: count
+    sql: interaction_id
+    timestamp: chat_start_at
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - interaction
+      - ticket
+      - agent
+      - team
+      - client
+    meta:
+      domain: cs
+      category: volume
+
+  - name: missed_chats
+    label: Missed Chats
+    model: ref('dim_cs_agent_scorecard')
+    description: Count of chat pings that were not accepted
+    type: sum
+    sql: assigned_pings_chat - assigned_and_accepted_pings_chat
+    timestamp: summary_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - agent
+      - team
+    meta:
+      domain: cs
+      category: chat_performance
+
+  # Phone Metrics
+  - name: call_volume
+    label: Call Volume
+    model: ref('prep_phone_ticket_interactions')
+    description: Total number of calls received
+    type: count
+    sql: interaction_id
+    timestamp: interaction_start_at
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - interaction
+      - ticket
+      - agent
+      - team
+      - client
+    meta:
+      domain: cs
+      category: volume
+
+  - name: phone_readiness
+    label: Phone Readiness Rate
+    model: ref('dim_cs_agent_scorecard')
+    description: Proportion of time spent in any state other than phone not ready state relative to scheduled phone time
+    type: ratio
+    sql: 1 - ((1.0000 * sum(notready_time)) / nullif(sum(scheduled_time_phone), 0))
+    timestamp: summary_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - agent
+      - team
+    meta:
+      domain: cs
+      category: phone_performance
+
+  - name: on_call_rate
+    label: On Call Rate
+    model: ref('dim_cs_agent_scorecard')
+    description: Proportion of time spent in on call state relative to productive scheduled phone time
+    type: ratio
+    sql: (1.0000 * sum(on_call_time)) / nullif(sum(scheduled_time_phone), 0)
+    timestamp: summary_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - agent
+      - team
+    meta:
+      domain: cs
+      category: phone_performance
+
+  # CSAT Metrics
+  - name: avg_csat_score
+    label: Average CSAT Score
+    model: ref('dim_ticket_summary_slim')
+    description: Average customer satisfaction score received
+    type: average
+    sql: csat_score_given
+    timestamp: last_solved_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - ticket
+      - agent
+      - team
+      - client
+    meta:
+      domain: cs
+      category: satisfaction
+
+  - name: csat_responses
+    label: CSAT Responses
+    model: ref('dim_ticket_summary_slim')
+    description: Total number of CSAT responses received
+    type: count
+    sql: case when csat_score_given is not null then csat_score_given else null end
+    timestamp: last_solved_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - ticket
+      - agent
+      - team
+      - client
+    meta:
+      domain: cs
+      category: satisfaction
+
+  - name: csat_score_5
+    label: CSAT 5 Count
+    model: ref('dim_ticket_summary_slim')
+    description: Total number of CSAT responses with a score of 5
+    type: count
+    sql: case when csat_score_given = 5 then csat_score_given else null end
+    timestamp: last_solved_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - ticket
+      - agent
+      - team
+      - client
+    meta:
+      domain: cs
+      category: satisfaction
+
+  - name: csat_5_rate
+    label: CSAT 5 Rate
+    model: ref('dim_ticket_summary_slim')
+    description: Proportion of CSAT scores that are 5 (excellent)
+    type: ratio
+    sql: {{ metric('csat_score_5') }} / nullif({{ metric('csat_responses') }}, 0)
+    timestamp: summary_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - ticket
+      - agent
+      - team
+      - client
+    meta:
+      domain: cs
+      category: satisfaction
+
+  - name: csat_coverage_rate
+    label: CSAT Coverage Rate
+    model: ref('dim_ticket_summary_slim')
+    description: Percentage of all solved tickets with a CSAT response
+    type: ratio
+    sql: {{ metric('csat_responses') }} / nullif({{ metric('tickets_solved') }}, 0)
+    timestamp: last_solved_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - ticket
+      - agent
+      - team
+      - client
+    meta:
+      domain: cs
+      category: satisfaction
+
+  # Ticket Metrics
+  - name: tickets_solved
+    label: Solved Tickets
+    model: ref('dim_ticket_summary_slim')
+    description: Total number of tickets solved
+    type: count
+    sql: case when status in ('solved', 'closed') then ticket_id else null end
+    timestamp: last_solved_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - ticket
+      - agent
+      - team
+      - client
+    meta:
+      domain: cs
+      category: tickets
+
+  - name: ticket_count
+    label: Total Tickets
+    model: ref('dim_ticket_summary_slim')
+    description: Total number of tickets created
+    type: count
+    sql: ticket_id
+    timestamp: ticket_created_at
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - ticket
+      - agent
+      - team
+      - client
+    meta:
+      domain: cs
+      category: tickets
+
+  - name: avg_handle_time
+    label: Average Handle Time
+    model: ref('dim_ticket_summary_slim')
+    description: Average time to handle and resolve tickets
+    type: average
+    sql: handle_time
+    timestamp: last_solved_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - ticket
+      - agent
+      - team
+      - client
+    meta:
+      domain: cs
+      category: performance
+
+  - name: avg_first_response_time
+    label: Average First Response Time
+    model: ref('dim_ticket_summary_slim')
+    description: Average time from ticket creation to first agent response
+    type: average
+    sql: avg_first_response_time
+    timestamp: last_solved_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - ticket
+      - agent
+      - team
+      - client
+    meta:
+      domain: cs
+      category: performance
+
+  # Quality Assurance Metrics
+  - name: avg_qa_score
+    label: Average QA Score
+    model: ref('prep_cx_level_ai_qa_scores')
+    description: Average quality assurance score received
+    type: average
+    sql: avg_qa_score
+    timestamp: last_solved_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - interaction
+      - ticket
+      - agent
+      - team
+      - client
+    meta:
+      domain: cs
+      category: quality
+
+  - name: qa_count
+    label: QA Evaluations
+    model: ref('dim_cs_agent_scorecard')
+    description: Number of interactions evaluated by QA
+    type: sum
+    sql: qa_count
+    timestamp: summary_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - interaction
+      - ticket
+      - agent
+      - team
+      - client
+    meta:
+      domain: cs
+      category: quality
+
+  # Web Interaction Metrics
+  - name: web_volume
+    label: Web Interaction Volume
+    model: ref('prep_web_ticket_interactions')
+    description: Total number of web interactions
+    type: count
+    sql: interaction_id
+    timestamp: interacted_at
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - interaction
+    meta:
+      domain: cs
+      category: volume
+
+  # =============================================================================
+  # TRANSFERS DOMAIN METRICS
+  # =============================================================================
+
+  - name: account_value
+    label: Account Value
+    model: ref('money_movement__dim_accounts')
+    description: >
+      Value of the client's account involved in the transfer, 
+      indicating business importance and risk level.
+    type: sum
+    sql: account_value
+    timestamp: transitioned_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - transfer
+    meta:
+      domain: transfers
+      category: financial
+
+  - name: transfer_duration_days
+    label: Transfer Duration (Days)
+    model: ref('money_movement__fct_institutional_transfer_state_histories')
+    description: >
+      Total duration of the full transfer lifecycle from 
+      first state to terminal state.
+    type: average
+    sql: datediff('days', transfer_created_at, cal_mapping_end_date::date)
+    timestamp: transitioned_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - transfer
+    meta:
+      domain: transfers
+      category: performance
+
+  - name: days_in_state
+    label: Days in Current State
+    model: ref('money_movement__fct_institutional_transfer_state_histories')
+    description: >
+      Number of days the transfer has remained in its current 
+      status without transitioning to a new state.
+    type: sum
+    sql: datediff('days', transitioned_date, next_state_transitioned_at)
+    timestamp: transitioned_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - transfer
+    meta:
+      domain: transfers
+      category: performance
+
+  - name: sla_breach_count
+    label: SLA Breaches
+    model: ref('money_movement__fct_institutional_transfer_state_histories')
+    description: Count of transfers that have breached SLA thresholds
+    type: count
+    sql: case when sla_flag = 1 then transfer_id else null end
+    timestamp: transitioned_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - transfer
+    meta:
+      domain: transfers
+      category: sla
+
+  - name: state_sla_breach_count
+    label: State-Level SLA Breaches
+    model: ref('money_movement__fct_institutional_transfer_state_histories')
+    description: Count of state-level SLA breaches
+    type: count
+    sql: case when state_sla_flag = 1 then transfer_id else null end
+    timestamp: transitioned_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - transfer
+    meta:
+      domain: transfers
+      category: sla
+
+  - name: stuck_transfers_count
+    label: Stuck Transfers
+    model: ref('money_movement__fct_institutional_transfer_state_histories')
+    description: >
+      Count of transfers that have been in the same state 
+      beyond acceptable thresholds.
+    type: count
+    sql: case when days_in_state > state_threshold then transfer_id else null end
+    timestamp: transitioned_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - transfer
+    meta:
+      domain: transfers
+      category: performance
+
+  - name: failed_transfers_count
+    label: Failed Transfers
+    model: ref('money_movement__fct_institutional_transfer_state_histories')
+    description: Count of transfers in failed or rejected states
+    type: count
+    sql: case when state in ('failed', 'rejected') then transfer_id else null end
+    timestamp: transitioned_date
+    time_grains: [day, week, month, quarter, year]
+    dimensions:
+      - transfer
+    meta:
+      domain: transfers
+      category: performance
+
+# Semantic layer configuration
+semantic_models:
+  - name: customer_support_metrics
+    description: Customer support performance and satisfaction metrics
+    model: ref('dim_ticket_summary_slim')
+    defaults:
+      agg_time_dimension: last_solved_date
+    
+    dimensions:
+      - name: ticket_id
+        type: categorical
+        expr: ticket_id
+      - name: agent_id
+        type: categorical
+        expr: agent_id
+      - name: team_id
+        type: categorical
+        expr: team_id
+      - name: client_id
+        type: categorical
+        expr: client_id
+      - name: last_solved_date
+        type: time
+        type_params:
+          time_granularity: day
+
+  - name: transfer_metrics
+    description: Money movement and transfer performance metrics
+    model: ref('money_movement__fct_institutional_transfer_state_histories')
+    defaults:
+      agg_time_dimension: transitioned_date
+    
+    dimensions:
+      - name: transfer_id
+        type: categorical
+        expr: transfer_id
+      - name: state
+        type: categorical
+        expr: state
+      - name: transitioned_date
+        type: time
+        type_params:
+          time_granularity: day
