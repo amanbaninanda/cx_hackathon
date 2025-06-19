@@ -1,0 +1,449 @@
+version: 2
+
+models:
+  # ada
+  - name: ada_conversations
+    description: Every row represents a conversation that happens in ada
+    columns:
+    - name: conversation_id
+      description: Unique identifier for the Ada conversation
+      test:
+        - not null
+        - unique
+
+  - name: ada_messages
+    description: Every row represents a message sent within a conversation within ada
+
+  # agent details
+  - name: dim_agent_availability
+    description: Shows agent availability each day. Broken down by start and end hour.
+    columns:
+    - name: date_summary
+      tests:
+        - not_null
+    - name: agent_email
+      tests:
+        - not_null
+    - name: cs_agent
+      tests:
+        - not_null
+    - name: activity_name
+      tests:
+        - not_null
+  - name: dim_agent_details
+    description: One row per agent.
+    columns: 
+    - name: agent_id
+      tests:
+        - unique
+        - not_null
+  - name: dim_agent_schedules
+    description: Combines additional agent details and schedule. Date and agent should not be null
+    columns:
+    - name: date_summary
+      tests:
+        - not_null
+    - name: cs_agent
+      tests:
+        - not_null
+  # agent details - 2023 revamp
+  - name: dim_agent_metrics_daily
+    description: Contains daily agent performance metrics
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - summary_date
+            - zendesk_user_id
+    columns:
+    - name: summary_date
+      tests:
+        - not_null
+    - name: zendesk_user_id
+      tests:
+        - not_null
+  - name: dim_agent_schedule
+    description: Playvox scheduling for agents by scheduled task
+    columns:
+    - name: scheduled_start_time
+      tests:
+        - not_null
+    - name: scheduled_end_time
+      tests:
+        - not_null
+    - name: scheduled_task
+      tests:
+        - not_null
+    - name: zendesk_user_id
+      tests:
+        - not_null
+  - name: dim_agent_history
+    description: Contains historical records of agent organizational structure.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - effective_from
+            - email
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - effective_from
+            - effective_to
+            - zendesk_user_id       
+    columns:
+    - name: effective_from
+      tests:
+        - not_null
+    - name: effective_to
+      tests:
+        - not_null
+    - name: email
+      tests:
+        - not_null
+  # interaction level
+  - name: dim_macro_interactions
+    description: Ticket macros applied at the interaction level.
+    columns:
+    - name: ticket_id
+      tests:
+        - not_null
+  # interaction level - 2023 revamp
+  - name: dim_chat_ticket_interactions
+    description: One row per chat ticket interaction.
+    columns:
+    - name: id
+      tests:
+        - not_null
+        - unique
+    - name: ticket_id
+      tests:
+        - not_null
+  - name: dim_phone_ticket_interactions
+    description: One row per phone ticket interaction.
+    columns:
+    - name: id
+      tests:
+        - not_null
+        - unique
+    - name: ticket_id
+      tests:
+        - not_null
+  - name: dim_web_ticket_interactions
+    description: One row per web ticket interaction.
+    columns:
+    - name: id
+      tests:
+        - not_null
+        - unique
+    - name: ticket_id
+      tests:
+        - not_null
+  # ticket level - 2023 revamp
+  - name: dim_zendesk_requesters
+    description: One row per zendesk user. This table maps Zendesk requesters (user ids) to identity_canonical_ids.
+    columns:
+    - name: user_id
+      tests:
+        - not_null
+        - unique
+    - name: identity_canonical_id
+      tests:
+        - not_null
+  - name: dim_chat_tickets
+    description: One row per chat ticket. This table contains chat-specific ticket attributes.
+    columns:
+    - name: ticket_id
+      tests:
+        - not_null
+        - unique
+  - name: dim_phone_tickets
+    description: One row per phone ticket. This table contains phone-specific ticket attributes.
+    columns:
+    - name: ticket_id
+      tests:
+        - not_null
+        - unique
+  - name: dim_web_tickets
+    description: One row per web ticket. This table contains web-specific ticket attributes.
+    columns:
+    - name: ticket_id
+      tests:
+        - not_null
+        - unique
+  - name: dim_ticket_summary
+    description: One row per ticket. This unions chat, phone, and web tickets for a comprehensive list. It only includes attributes that are common across all ticket types (ex. no chat-specific attributes).
+    columns:
+      - name: ticket_id
+        description: Unique identifier for the ticket
+        tests:
+          - not_null
+          - unique
+      - name: ticket_created_at
+        description: Timestamp when the ticket was created
+      - name: first_solved_at
+        description: Timestamp when the ticket was first solved
+      - name: last_solved_date
+        description: Date when the ticket was last solved
+      - name: close_date
+        description: Date when the ticket was closed
+      - name: status
+        description: |
+          Current status of the ticket. Possible values are:
+          1. 'open' - Ticket is being worked on
+          2. 'pending' - Waiting for response or action
+          3. 'hold' - Ticket is on hold
+          4. 'solved' - Ticket has been resolved
+          5. 'closed' - Ticket has been closed
+          6. 'deleted' - Ticket has been deleted (typically spam)
+      - name: priority
+        description: |
+          Priority level of the ticket. Possible values are:
+          1. 'urgent' - Highest priority tickets
+          2. 'high' - High priority tickets
+          3. 'normal' - Standard priority tickets (default if not specified)
+          4. 'low' - Low priority tickets
+      - name: pillar
+        description: |
+          Support team or department handling the ticket. Possible values are:
+          1. 'CS' - Customer Service
+          2. 'Sales Ops' - Sales Operations
+          3. 'Work' - Work team
+          4. 'Gold Glove' - Gold Glove team
+          5. 'Operations' - Operations team
+          6. 'CS Operations' - Customer Service Operations
+          7. 'PM' - Product Management
+          8. 'Other' - Other teams
+          9. 'Trade Desk' - Trade Desk team
+      - name: channel
+        description: Channel through which the ticket was created (chat, phone, or web)
+      - name: inbound_outbound
+        description: Direction of the ticket (inbound or outbound)
+      - name: is_incident_ticket
+        description: Boolean indicating if this is an incident ticket
+      - name: has_jira
+        description: Boolean indicating if the ticket has a linked Jira issue
+      - name: cs_group
+        description: Customer service group handling the ticket
+      - name: manager
+        description: Manager overseeing the ticket
+      - name: team_lead
+        description: Team lead overseeing the ticket
+      - name: is_bpo
+        description: Boolean indicating if the ticket is handled by a BPO agent
+      - name: is_premium
+        description: Boolean indicating if this is a premium support ticket
+      - name: cs_agent_position_type
+        description: Type of position of the customer service agent
+      - name: cs_agent_position
+        description: Position of the customer service agent
+      - name: cs_agent_id
+        description: Identifier of the customer service agent
+      - name: cs_agent
+        description: Name of the customer service agent
+      - name: cs_agent_timezone
+        description: Timezone of the customer service agent
+      - name: first_forwarded_pillar
+        description: First pillar the ticket was forwarded to
+      - name: first_cs_group_forwarded
+        description: First customer service group the ticket was forwarded to
+      - name: first_forwarded_manager
+        description: First manager the ticket was forwarded to
+      - name: first_forwarded_team_lead
+        description: First team lead the ticket was forwarded to
+      - name: first_forwarded_is_bpo
+        description: Boolean indicating if the first forward was to a BPO agent
+      - name: first_forwarded_is_premium
+        description: Boolean indicating if the first forward was to premium support
+      - name: first_forwarded_cs_agent_position_type
+        description: Position type of the first agent the ticket was forwarded to
+      - name: first_forwarded_cs_agent_position
+        description: Position of the first agent the ticket was forwarded to
+      - name: first_forwarded_cs_agent_id
+        description: Identifier of the first agent the ticket was forwarded to
+      - name: first_forwarded_cs_agent
+        description: Name of the first agent the ticket was forwarded to
+      - name: first_reply_time
+        description: Time taken to provide the first response
+      - name: handle_time
+        description: Total time spent handling the ticket
+      - name: transfer_count
+        description: Number of times the ticket was transferred
+      - name: time_to_first_resolution
+        description: Time taken to reach first resolution
+      - name: time_to_last_resolution
+        description: Time taken to reach final resolution
+      - name: ext_cat_1
+        description: |
+          External-facing categories for the ticket, derived from ticket tags. Multiple categories are separated by ' | ' and ordered alphabetically. Categories are sourced from the cx_category_revamp_2022 reference and include only external-facing categories with non-null tag tiers.
+      - name: int_cat_1
+        description: Internal-facing categories with tag tier 2, separated by ' | ' and ordered alphabetically
+      - name: int_cat_2
+        description: Internal-facing categories with tag tier 3, separated by ' | ' and ordered alphabetically
+      - name: int_cat_3
+        description: Internal-facing categories with tag tier 4, separated by ' | ' and ordered alphabetically
+      - name: int_cat_4
+        description: Internal-facing categories with tag tier 5, separated by ' | ' and ordered alphabetically
+      - name: ticket_tags
+        description: All tags associated with the ticket, aggregated from Zendesk ticket tags and separated by commas
+      - name: requester_user_id
+        description: User ID of the ticket requester
+      - name: requester_identity_canonical_id
+        description: Identity canonical ID of the ticket requester
+      - name: csat
+        description: Customer satisfaction score
+      - name: csat_score_given
+        description: Numerical score given in the CSAT survey
+      - name: csat_comment
+        description: Comment provided in the CSAT survey
+      - name: ces
+        description: Customer effort score, normalized to a value between 0 and 1. Collected through Typeform surveys on a 7-point scale.
+      - name: ces_score_given
+        description: Raw customer effort score given in the survey (1-7 scale)
+      - name: ces_comment
+        description: Optional comment provided in the customer effort score survey
+      - name: is_abandoned
+        description: Boolean indicating if the ticket was abandoned
+      - name: qa_score
+        description: |
+          Quality assurance score for the ticket, sourced from either:
+          1. MaestroQA - Average of rubric scores normalized by maximum possible score
+          2. Level AI - Raw score rounded to 2 decimal places
+      - name: most_recent_jira_issue_key
+        description: Key of the most recent linked Jira issue
+      - name: most_recent_jira_project_key
+        description: Key of the Jira project containing the most recent issue
+      - name: most_recent_jira_project_name
+        description: Name of the Jira project containing the most recent issue
+      - name: most_recent_jira_eoc_problem_area
+        description: End of chain problem area from the most recent Jira issue
+      - name: parent_topic
+        description: High-level category for the ticket, predicted by the ERNIE model. This is the broadest level of categorization.
+      - name: topic
+        description: Main topic category for the ticket, predicted by the ERNIE model. This is a subcategory of the parent_topic.
+      - name: topic_probability
+        description: Confidence score (0-1) for the topic prediction by ERNIE. A score of 0 indicates 'ai_tp_vague_or_irrelevant_text'.
+      - name: subtopic
+        description: Detailed subcategory for the ticket, predicted by the ERNIE model. This is the most specific level of categorization. 'ai_stp_n_a' indicates no applicable subtopic.
+      - name: subtopic_probability
+        description: Confidence score (0-1) for the subtopic prediction by ERNIE. A score of 0 indicates 'ai_stp_n_a'.
+      - name: account_types
+        description: |
+          Comma-separated list of account types associated with the ticket, sourced from Zendesk ticket fields. 
+          Values include regular accounts (e.g. 'tfsa', 'rrsp', 'non_registered'), group accounts (e.g. 'group_tfsa', 'group_rrsp'), 
+          and other specialized accounts. Multiple account types are separated by ', ' and ordered by their original field index.
+      - name: client_tier_at_reachout
+        description: |
+          Client's tier level at the time they reached out for support. Possible values are:
+          1. 'generation' - Highest tier, typically for clients with $500,000+ in assets
+          2. 'premium' - Second highest tier, typically for clients with $100,000-$500,000 in assets
+          3. 'trying premium' - Clients in a premium trial period
+          4. 'core' - Standard tier for regular clients
+          5. 'sub-threshold-core' - Clients below the core threshold
+          6. 'non-client' - For users who haven't yet become clients
+      - name: client_first_registered_date
+        description: Date when the client first registered with Wealthsimple
+      - name: client_tenure_type
+        description: Classification of client's tenure with Wealthsimple (e.g. 'new', 'existing')
+      - name: aum_at_reachout
+        description: Client's total assets under management (AUM) at the time they reached out for support
+  - name: dim_ticket_demand
+    description: One row per ticket or abandonment interaction. This includes all phone, chat, and web tickets, as well as abandoned phone calls that did not become a ticket.
+    columns:
+    - name: interaction_id
+      description: Unique identifier for the interaction.
+      tests:
+        - not_null
+        - unique
+  - name: dim_flagged_tickets
+    description: >
+      Snapshot of all currently active inbound CS tickets that meet at least one of the business-defined flagging criteria for potential Level 3 (L3) escalation. 
+      This view reflects the *current* state of at risk tickets and is used as the source of truth for identifying L3-risk tickets in real time.
+    columns:
+      - name: ticket_id
+        description: Unique identifier for the Zendesk ticket.
+        tests:
+          - not_null
+          - unique
+  - name: dim_flagged_tickets_tracker
+    description: >
+      Historical tracker for all inbound CS tickets that have ever met at least one L3-flagging condition. 
+      This model captures a persistent record of ticket-level risk flags as they existed at the time of evaluation.
+      It is updated incrementally as new tickets meet flagging criteria or as existing ticket statuses evolve.
+    columns:
+      - name: ticket_id
+        description: Unique identifier for the Zendesk ticket.
+        tests:
+          - not_null
+          - unique
+# backlog
+  - name: dim_backlog_tickets
+    description: One row per ticket and summary date. This includes all new, pending, and open phoen, chat, and web tickets. This table calculates the midnight backlog.
+    columns:
+    - name: ticket_id
+      description: Unique identifier for the tickets.
+      tests:
+        - not_null
+# csat responses
+  - name: dim_csats
+    description: One row per csat response. Each csat response is linked to a ticket. As of Jan 13 2023, we moved from sending out Zendesk CSAT survey links to Typeform CSAT survey links. CSAT surveys can also come from Ada, our chatbot.
+    columns:
+    - name: id
+      tests:
+        - not_null
+        - unique
+    - name: ticket_id
+      tests:
+        - not_null
+# jira
+  - name: dim_ticket_jira_issues
+    description: Jira issues that are linked to a ticket. A ticket can have multiple linked Jira issues.
+    columns:
+    - name: ticket_id
+      tests:
+        - not_null
+    - name: jira_issue_key
+      tests:
+        - not_null
+# QA
+  - name: dim_agent_level_ai_qa_daily
+    description: QAs done through Level AI aggregated by day & zendesk user
+    columns:
+    - name: summary_date
+      description: reporting day
+      tests:
+        - not_null
+    - name: zendesk_user_id
+      description: agent identifier
+      tests:
+        - not_null
+  - name: dim_agent_qa_daily
+    description: QAs done through Level AI & MaestroQA, aggregated by day & zendesk user.
+    columns:
+    - name: summary_date
+      description: reporting day
+      tests:
+        - not_null
+    - name: zendesk_user_id
+      description: agent identifier
+      tests:
+        - not_null
+# topic predictions (ERNIE)
+  - name: dim_ticket_topic_predictions
+    description: One row per ticket. These are topic and subtopic predictions made by Ernie.
+    columns:
+    - name: ticket_id
+      tests:
+        - not_null
+        - unique
+  - name: dim_ticket_summary_slim
+    description: One row per ticket. This table contains metadata on the ticket.
+    columns:
+    - name: ticket_id
+      description: Unique identifier (primary key) for the ticket
+      tests:
+        - not_null:
+            config:
+              severity: warn
+        - unique:
+            config:
+              severity: warn
+  - name: dim_cs_chat_interactions
+    description: One row per chat interaction. This table contains metadata on the CS chat interactions.
