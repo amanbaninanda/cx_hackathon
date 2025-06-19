@@ -1,0 +1,82 @@
+version: 2
+
+models:
+  - name: map_chat_decagon_zendesk
+    description: |
+      This model is used to map data on chat conversations in Decagon and Zendesk.
+      We need this because Decagon holds all chat info including those fully handled by AI, but the Zendesk chat data contains info on which agent handled which part of a chat.
+    columns:
+    - name: decagon_conversation_id
+      description: unique identifier for every chat conversation from Decagon
+      tests:
+        - not_null
+    - name: zendesk_chat_id
+      description: unique identifier for every chat conversation from Zendesk
+      tests:
+        - not_null
+        - unique
+
+  - name: prep_chat_messages_zendesk
+    description: |
+      This model is used to prepare chat messages from Zendesk.
+      It includes the chat ID, message ID, and the content of the message.
+      This is primarily used to enrich the Decagon chat data with Zendesk information such as agent, department, etc.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - decagon_conversation_id
+            - agent_message_sequence
+          config:
+            where: "decagon_conversation_id IS NOT NULL"
+
+  - name: prep_chat_messages
+    description: |
+      This model holds all our chat message level data.
+      It stitches together the Decagon chat data with Zendesk chat data.
+      We need to do this because Decagon holds all chat info including those fully handled by AI, but the Zendesk chat data contains info on which agent handled which part of a chat.
+    columns:
+    - name: identity_canonical_id
+      description: unique identifier for every client in Wealthsimple.
+      type: string
+    - name: decagon_conversation_id
+      description: unique identifier for every chat conversation from Decagon.
+      type: string
+    - name: zendesk_chat_id
+      description: unique identifier for every chat conversation from Zendesk.
+      type: string
+    - name: department_id
+      description: unique identifier for the agent's department in Zendesk.
+      type: integer
+    - name: agent_id
+      description: unique identifier for the agent in Zendesk.
+      type: integer
+    - name: _interaction_id
+      description: unique identifier for the interaction. Each conversation between a client and an agent/ai is considered an interaction.
+      type: string
+    - name: role
+      description: role of the message sender (e.g., USER, AGENT, AI).
+      type: string
+    - name: message_sequence
+      description: sequence number of the message in the conversation.
+      type: integer
+    - name: message_text
+      description: content of the message.
+      type: string
+    - name: sent_at_et
+      description: timestamp when the message was sent in Eastern Time.
+      type: timestamp
+    - name: seconds_since_last_message
+      description: number of seconds since the previous message in the conversation.
+      type: integer
+    - name: is_first_message
+      description: boolean indicating if this is the first message in the conversation.
+      type: boolean
+    - name: is_agent_arrival
+      description: boolean indicating if this message is the first message from an agent in the conversation.
+      type: boolean
+    - name: is_final_ai_message
+      description: boolean indicating if this message is the last message from an AI in the conversation.
+      type: boolean
+    - name: is_weekend
+      description: boolean indicating if the message was sent on a weekend.
+      type: boolean
