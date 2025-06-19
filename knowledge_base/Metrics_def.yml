@@ -1,25 +1,29 @@
 version: 2
 
-# Business Metrics Configuration
-# This file defines business metrics for analytics and reporting
-# Organized by domain: CS (Customer Support) and Transfers
+# =================================================================================================
+# COMPREHENSIVE BUSINESS METRICS DEFINITION CATALOG
+# =================================================================================================
+# This document serves as the authoritative, single source of truth for the definition, calculation,
+# and business context of key performance indicators (KPIs) and operational metrics.
+# Each metric is meticulously detailed to ensure consistency in reporting, clarity in analysis,
+# and a shared understanding of performance across all business domains.
+#
+# The structure for each metric includes:
+#   - Core YAML properties for a semantic layer/metrics tool.
+#   - An extensive 'meta' block containing detailed documentation:
+#     - definition_long: A comprehensive, narrative explanation.
+#     - business_purpose: The "why" behind the metric, its strategic value, and actionable insights.
+#     - calculation_logic: An unambiguous, step-by-step formula.
+#     - calculation_example: A concrete, numerical walkthrough.
+#     - data_source_details: Precise data lineage information.
+#     - units: The specific unit of measurement.
+#     - interpretation_notes: Guidance on how to properly interpret the metric's values.
+# =================================================================================================
 
 metrics:
   # =============================================================================
   # CUSTOMER SUPPORT (CS) DOMAIN METRICS
   # =============================================================================
-  
-  # 1. Metric Name: Adherence
-  # Definition: Amount of time spent in adherent state relative to productive time, used to measure agent schedule compliance.
-  # 
-  # 2. Calculation Logic:
-  # sum(adherence_productive_time) / scheduled_productive_hours
-  #
-  # 3. Data Source(s): dim_agent_scheduling_daily (columns: adherence_productive_time, scheduled_productive_time)
-  #
-  # 4. Units: Ratio (0-1)
-  #
-  # 5. Dimensions: Can be analyzed by agent, team, day, week, month, quarter, year
   - name: adherence
     label: Adherence
     model: ref('dim_agent_scheduling_daily')
@@ -27,7 +31,7 @@ metrics:
       Amount of time spent in adherent state relative to productive time.
       Used to measure agent schedule compliance.
     type: ratio
-    sql: sum(1.0000 * adherence_productive_time) / nullif({{ metric('scheduled_productive_hours') }}, 0)
+    sql: sum(1.0000 * adherence_productive_time) / nullif({{ metric('scheduled_productive_hours') }} * 3600, 0)
     timestamp: summary_date
     time_grains: [day, week, month, quarter, year]
     dimensions:
@@ -36,18 +40,28 @@ metrics:
     meta:
       domain: cs
       category: agent_performance
+      definition_long: >
+        Adherence is a performance metric that quantifies the degree to which a customer support agent complies with their assigned schedule. It is calculated as the total time an agent spent in a value-adding, "adherent" state (e.g., handling contacts, available for contacts, authorized project work) divided by their total scheduled productive time. It specifically excludes non-productive time such as breaks, lunches, or meetings unless they are part of a planned, adherent activity.
+      business_purpose: >
+        The primary purpose of measuring adherence is to ensure optimal resource allocation and operational efficiency. It helps managers verify that staffing levels align with forecasted contact volumes, thereby minimizing customer wait times and controlling labor costs. Consistently low adherence can indicate issues with agent engagement, time management, or systemic problems that prevent agents from following their schedule, prompting targeted coaching or process improvements.
+      calculation_logic: "SUM(Total seconds in adherent states) / SUM(Total seconds in scheduled productive states)"
+      calculation_example: >
+        - Scenario: An agent is scheduled for 8 hours, with 1 hour of unpaid breaks.
+        - Scheduled Productive Time: 7 hours = 25,200 seconds.
+        - Actual Adherent Time: The agent spent 6.5 hours (23,400 seconds) in adherent states.
+        - Calculation: `23,400 / 25,200 = 0.9286`
+        - Result: The agent's adherence for the day is 92.86%.
+      data_source_details:
+        model: dim_agent_scheduling_daily
+        columns:
+          - adherence_productive_time (numerator, in seconds)
+          - scheduled_productive_time (used in denominator metric, in seconds)
+      units: "Ratio (0.00 to 1.00), typically presented as a percentage (e.g., 92.86%)."
+      interpretation_notes: >
+        - A high adherence rate (typically >90-95%) is desirable.
+        - 100% adherence is often unrealistic and can be a negative sign, suggesting agents are not taking necessary micro-breaks, which could lead to burnout.
+        - Low adherence requires investigation to understand the root cause (e.g., technical issues, excessive non-adherent but necessary work, behavioral issues).
 
-  # 1. Metric Name: Scheduled Productive Hours
-  # Definition: Total scheduled productive hours for agents
-  # 
-  # 2. Calculation Logic:
-  # (scheduled_productive_time in seconds) / (3600 seconds per hour)
-  #
-  # 3. Data Source(s): dim_cs_agent_scorecard (columns: scheduled_productive_time)
-  #
-  # 4. Units: Hours
-  #
-  # 5. Dimensions: Can be analyzed by agent, team, day, week, month, quarter, year
   - name: scheduled_productive_hours
     label: Productive Hours
     model: ref('dim_cs_agent_scorecard')
@@ -62,18 +76,24 @@ metrics:
     meta:
       domain: cs
       category: agent_performance
+      definition_long: >
+        This metric represents the total number of hours an agent is scheduled to be engaged in productive, customer-facing, or directly value-adding activities. It forms the baseline for what is expected from an agent during their shift and is a fundamental component for calculating other efficiency metrics. It explicitly excludes scheduled non-productive time like meal breaks or unpaid time off.
+      business_purpose: >
+        Scheduled Productive Hours is a foundational metric for workforce management and capacity planning. It is the denominator for critical efficiency ratios like Adherence and Occupancy. Tracking this allows the business to understand planned capacity, forecast staffing needs, and ensure that scheduling aligns with strategic operational goals.
+      calculation_logic: "SUM(scheduled_productive_time_in_seconds) / 3600"
+      calculation_example: >
+        - Scenario: A team of 10 agents each works a standard 8-hour shift with 1 hour of breaks.
+        - Individual Productive Time: Each agent has 7 scheduled productive hours (25,200 seconds).
+        - Team Calculation: `(10 agents * 25,200 seconds/agent) / 3600 seconds/hour = 70 hours`.
+        - Result: The team has 70 Scheduled Productive Hours for the day.
+      data_source_details:
+        model: dim_cs_agent_scorecard
+        columns:
+          - scheduled_productive_time (in seconds)
+      units: "Hours"
+      interpretation_notes: >
+        This is a volume metric, not a performance indicator on its own. It provides the context of scale for other metrics. A change in this value typically reflects changes in staffing or scheduling strategy.
 
-  # 1. Metric Name: Occupancy
-  # Definition: Proportion of time spent in occupancy state relative to productive scheduled time
-  # 
-  # 2. Calculation Logic:
-  # sum(occupancy_productive_time) / sum(scheduled_productive_time)
-  #
-  # 3. Data Source(s): dim_cs_agent_scorecard (columns: occupancy_productive_time, scheduled_productive_time)
-  #
-  # 4. Units: Ratio (0-1)
-  #
-  # 5. Dimensions: Can be analyzed by agent, team, day, week, month, quarter, year
   - name: occupancy
     label: Occupancy Rate
     model: ref('dim_cs_agent_scorecard')
@@ -88,28 +108,35 @@ metrics:
     meta:
       domain: cs
       category: agent_performance
+      definition_long: >
+        Occupancy measures the proportion of an agent's logged-in, productive time that is spent actively handling customer interactions (e.g., talk time, hold time, wrap-up time). It is a key indicator of agent utilization and workload, showing how "busy" agents are with handling contacts versus being idle or available.
+      business_purpose: >
+        This metric is critical for assessing workforce efficiency and preventing both agent burnout and underutilization. A very high occupancy rate (e.g., >95%) over a sustained period can signal understaffing and lead to burnout. A low rate may indicate overstaffing, low contact volume, or operational inefficiencies, presenting an opportunity to reallocate resources or provide agents with other tasks.
+      calculation_logic: "SUM(Total time spent handling contacts in seconds) / SUM(Total scheduled productive time in seconds)"
+      calculation_example: >
+        - Scenario: An agent has 7 scheduled productive hours (25,200 seconds).
+        - Time Spent on Contacts: The agent spends 4 hours on calls, 1 hour on hold, and 1.25 hours in after-call work. Total occupancy time = 6.25 hours (22,500 seconds).
+        - Calculation: `22,500 / 25,200 = 0.8928`
+        - Result: The agent's occupancy for the day is 89.28%.
+      data_source_details:
+        model: dim_cs_agent_scorecard
+        columns:
+          - occupancy_productive_time (numerator, in seconds)
+          - scheduled_productive_time (denominator, in seconds)
+      units: "Ratio (0.00 to 1.00), typically presented as a percentage (e.g., 89.28%)."
+      interpretation_notes: >
+        - The ideal occupancy rate is typically between 85% and 90%.
+        - Consistently high occupancy (>90%) is a significant risk factor for employee attrition.
+        - Consistently low occupancy (<80%) suggests a need to review staffing models or forecast accuracy.
 
-  # 1. Metric Name: First Contact Resolution (FCR)
-  # Definition: The percentage of customer support tickets that are resolved during the first interaction with the support team, without requiring follow-up contacts.
-  # 
-  # 2. Calculation Logic:
-  # (COUNT(DISTINCT tickets resolved on first contact)) / (COUNT(DISTINCT total resolvable tickets created in the period)) * 100
-  # - Tickets resolved on first contact: ticket_id from dim_ticket_summary_slim where resolution_contacts = 1 AND status IN ('solved', 'closed')
-  # - Total resolvable tickets: ticket_id from dim_ticket_summary_slim where status IN ('solved', 'closed', 'open', 'pending')
-  # - Period: Based on ticket_created_at
-  #
-  # 3. Data Source(s): dim_ticket_summary_slim (columns: ticket_id, resolution_contacts, status, ticket_created_at)
-  #
-  # 4. Units: Percentage (%)
-  #
-  # 5. Dimensions: Can be analyzed by date, channel, L1 agent, L1 team.
   - name: first_contact_resolution_rate
     label: First Contact Resolution Rate
     model: ref('dim_ticket_summary_slim')
     description: Percentage of tickets resolved on first contact without requiring follow-ups
     type: ratio
-    sql: sum(case when resolution_contacts = 1 and status in ('solved', 'closed') then 1 else 0 end) / 
-         nullif(sum(case when status in ('solved', 'closed', 'open', 'pending') then 1 else 0 end), 0)
+    sql: >
+      sum(case when resolution_contacts = 1 and status in ('solved', 'closed') then 1 else 0 end) /
+      nullif(sum(case when status in ('solved', 'closed', 'open', 'pending') then 1 else 0 end), 0)
     timestamp: ticket_created_at
     time_grains: [day, week, month, quarter, year]
     dimensions:
@@ -120,18 +147,30 @@ metrics:
     meta:
       domain: cs
       category: performance
+      definition_long: >
+        First Contact Resolution (FCR), also known as First Call Resolution, measures the percentage of customer inquiries that are successfully resolved during the initial interaction. This means the customer does not need to call back, email again, or have the issue escalated to resolve their problem. It is a powerful indicator of both customer satisfaction and operational efficiency.
+      business_purpose: >
+        A high FCR rate is strongly correlated with increased customer satisfaction and loyalty, as it reflects an effortless customer experience. Operationally, it reduces the costs associated with repeat contacts and frees up agent capacity to handle new, incoming issues. Tracking FCR helps identify knowledge gaps, process inefficiencies, or empowerment issues within the support team.
+      calculation_logic: "(Count of tickets resolved in a single contact) / (Total count of resolvable tickets created in the period)"
+      calculation_example: >
+        - Scenario: In one week, the support team receives 500 new, resolvable tickets.
+        - Resolved on First Contact: Analysis of these tickets shows that 375 of them were marked as 'solved' after only one interaction (`resolution_contacts = 1`).
+        - Total Resolvable Tickets: The total number of tickets created in the period that are eligible for resolution is 500.
+        - Calculation: `375 / 500 = 0.75`
+        - Result: The FCR rate for the week is 75%.
+      data_source_details:
+        model: dim_ticket_summary_slim
+        columns:
+          - ticket_id
+          - resolution_contacts
+          - status
+          - ticket_created_at
+      units: "Ratio (0.00 to 1.00), presented as a percentage (e.g., 75%)."
+      interpretation_notes: >
+        - Industry benchmarks for FCR vary by channel (e.g., phone vs. email) but are typically in the 70-80% range.
+        - This metric can be susceptible to 'gaming' if not properly audited. It should be analyzed alongside Customer Satisfaction (CSAT) scores to ensure high FCR isn't coming at the expense of a quality resolution.
+        - The definition of 'contact' and 'resolution' must be standardized across the organization.
 
-  # 1. Metric Name: Chat Acceptance Rate
-  # Definition: Rate of chats accepted relative to total chats assigned
-  # 
-  # 2. Calculation Logic:
-  # sum(accepted_pings_chat) / sum(assigned_and_accepted_pings_chat)
-  #
-  # 3. Data Source(s): dim_cs_agent_scorecard (columns: accepted_pings_chat, assigned_and_accepted_pings_chat)
-  #
-  # 4. Units: Ratio (0-1)
-  #
-  # 5. Dimensions: Can be analyzed by agent, team, day, week, month, quarter, year
   - name: chat_acceptance_rate
     label: Chat Acceptance Rate
     model: ref('dim_cs_agent_scorecard')
@@ -146,18 +185,26 @@ metrics:
     meta:
       domain: cs
       category: chat_performance
+      definition_long: >
+        The Chat Acceptance Rate is the percentage of incoming chat requests routed to an agent that are actually accepted by that agent before they time out or are reassigned. It is a direct measure of an agent's attentiveness and availability to engage with customers via the chat channel.
+      business_purpose: >
+        This metric is crucial for managing the real-time customer experience in the chat queue. A low acceptance rate leads to longer customer wait times and higher abandonment rates. It helps supervisors identify agents who may be avoiding work, are overwhelmed with their current tasks (and thus cannot accept more), or are experiencing technical difficulties with their chat client.
+      calculation_logic: "SUM(Total chats accepted by an agent) / SUM(Total chats assigned to that agent)"
+      calculation_example: >
+        - Scenario: An agent is assigned 50 incoming chat pings during their shift.
+        - Accepted Chats: The agent clicks 'accept' on 48 of those chats.
+        - Calculation: `48 / 50 = 0.96`
+        - Result: The agent's Chat Acceptance Rate is 96%.
+      data_source_details:
+        model: dim_cs_agent_scorecard
+        columns:
+          - accepted_pings_chat (numerator)
+          - assigned_and_accepted_pings_chat (denominator, representing total assigned)
+      units: "Ratio (0.00 to 1.00), presented as a percentage (e.g., 96%)."
+      interpretation_notes: >
+        - A high rate (typically >95%) is desirable.
+        - A low rate warrants immediate investigation. It can indicate behavioral issues, system problems, or an agent being overloaded with concurrent work.
 
-  # 1. Metric Name: Chat Readiness Rate
-  # Definition: Proportion of time spent in chat ready state relative to scheduled chat time
-  # 
-  # 2. Calculation Logic:
-  # sum(chat_online_time) / sum(scheduled_time_chat)
-  #
-  # 3. Data Source(s): dim_cs_agent_scorecard (columns: chat_online_time, scheduled_time_chat)
-  #
-  # 4. Units: Ratio (0-1)
-  #
-  # 5. Dimensions: Can be analyzed by agent, team, day, week, month, quarter, year
   - name: chat_readiness_rate
     label: Chat Readiness Rate
     model: ref('dim_cs_agent_scorecard')
@@ -172,18 +219,26 @@ metrics:
     meta:
       domain: cs
       category: chat_performance
+      definition_long: >
+        The Chat Readiness Rate measures the percentage of time an agent was in an 'Available' or 'Ready' status for the chat channel, compared to the total time they were scheduled to be available for chats. It is a channel-specific version of schedule adherence.
+      business_purpose: >
+        This metric ensures that staffing for the chat channel is effective and that agents are prepared to receive customer inquiries as planned. It helps managers diagnose capacity issues, differentiating between problems of overall adherence versus issues specific to the chat channel (e.g., an agent forgetting to set their status to 'available' after handling an email).
+      calculation_logic: "SUM(Total time in 'Ready' state for chat) / SUM(Total time scheduled for chat)"
+      calculation_example: >
+        - Scenario: An agent is scheduled for 4 hours of dedicated chat time (14,400 seconds).
+        - Actual Ready Time: Due to other tasks, the agent was only in a 'Ready' status for 3.8 hours (13,680 seconds).
+        - Calculation: `13,680 / 14,400 = 0.95`
+        - Result: The agent's Chat Readiness Rate is 95%.
+      data_source_details:
+        model: dim_cs_agent_scorecard
+        columns:
+          - chat_online_time (numerator, in seconds)
+          - scheduled_time_chat (denominator, in seconds)
+      units: "Ratio (0.00 to 1.00), presented as a percentage (e.g., 95%)."
+      interpretation_notes: >
+        - Similar to Adherence, a high rate (>95%) is expected.
+        - Low rates can indicate poor time management, technical issues, or flawed scheduling.
 
-  # 1. Metric Name: Chat Volume
-  # Definition: Total number of chats created
-  # 
-  # 2. Calculation Logic:
-  # COUNT(interaction_id)
-  #
-  # 3. Data Source(s): prep_chat_ticket_interactions (columns: interaction_id, chat_start_at)
-  #
-  # 4. Units: Count
-  #
-  # 5. Dimensions: Can be analyzed by interaction, ticket, agent, team, client, day, week, month, quarter, year
   - name: chat_volume
     label: Chat Volume
     model: ref('prep_chat_ticket_interactions')
@@ -201,24 +256,30 @@ metrics:
     meta:
       domain: cs
       category: volume
+      definition_long: >
+        Chat Volume is a straightforward count of the total number of distinct chat interactions initiated within a specific time period. Each new chat session with a customer counts as one unit.
+      business_purpose: >
+        This is a fundamental workload metric used for historical trend analysis, demand forecasting, and staffing decisions. Understanding chat volume helps the business allocate the appropriate number of agents to the chat channel and provides essential context for other rate-based metrics (e.g., a drop in CSAT is more significant during a high-volume period).
+      calculation_logic: "COUNT(DISTINCT interaction_id)"
+      calculation_example: >
+        - Scenario: We want to measure the chat volume for a specific Tuesday.
+        - Data: The system logs show 1,250 unique chat interactions were created on that day.
+        - Result: The Chat Volume for that Tuesday is 1,250.
+      data_source_details:
+        model: prep_chat_ticket_interactions
+        columns:
+          - interaction_id
+      units: "Count of chats"
+      interpretation_notes: >
+        - This is a volume metric, not a performance metric. Its interpretation depends on business goals (e.g., a company trying to shift customers to chat might see rising volume as a success).
+        - It should be analyzed over time to identify trends, seasonality, and the impact of business changes.
 
-  # 1. Metric Name: Missed Chats
-  # Definition: Count of chat pings that were not accepted
-  # 
-  # 2. Calculation Logic:
-  # assigned_pings_chat - assigned_and_accepted_pings_chat
-  #
-  # 3. Data Source(s): dim_cs_agent_scorecard (columns: assigned_pings_chat, assigned_and_accepted_pings_chat)
-  #
-  # 4. Units: Count
-  #
-  # 5. Dimensions: Can be analyzed by agent, team, day, week, month, quarter, year
   - name: missed_chats
     label: Missed Chats
     model: ref('dim_cs_agent_scorecard')
     description: Count of chat pings that were not accepted
     type: sum
-    sql: assigned_pings_chat - assigned_and_accepted_pings_chat
+    sql: assigned_pings_chat - accepted_pings_chat
     timestamp: summary_date
     time_grains: [day, week, month, quarter, year]
     dimensions:
@@ -227,18 +288,26 @@ metrics:
     meta:
       domain: cs
       category: chat_performance
+      definition_long: >
+        Missed Chats is a count of the number of chat requests that were assigned to an agent but were not accepted, resulting in the customer waiting longer or abandoning the request. It is the absolute number counterpart to the Chat Acceptance Rate.
+      business_purpose: >
+        This metric directly quantifies lost opportunities for customer engagement and highlights service level failures. A high number of missed chats indicates a poor customer experience and potential inefficiencies in the chat routing or staffing model. It helps managers pinpoint specific agents or times of day where issues are most prevalent.
+      calculation_logic: "SUM(Total chats assigned) - SUM(Total chats accepted)"
+      calculation_example: >
+        - Scenario: An agent was assigned 50 chats during their shift and accepted 48 of them.
+        - Calculation: `50 - 48 = 2`
+        - Result: The agent had 2 Missed Chats.
+      data_source_details:
+        model: dim_cs_agent_scorecard
+        columns:
+          - assigned_pings_chat (total assigned)
+          - accepted_pings_chat (total accepted)
+      units: "Count of chats"
+      interpretation_notes: >
+        - The ideal value is 0.
+        - Any number greater than zero represents a direct service failure and should be investigated.
+        - This metric should be monitored in real-time if possible to allow for immediate intervention.
 
-  # 1. Metric Name: Call Volume
-  # Definition: Total number of calls received
-  # 
-  # 2. Calculation Logic:
-  # COUNT(interaction_id)
-  #
-  # 3. Data Source(s): prep_phone_ticket_interactions (columns: interaction_id, interaction_start_at)
-  #
-  # 4. Units: Count
-  #
-  # 5. Dimensions: Can be analyzed by interaction, ticket, agent, team, client, day, week, month, quarter, year
   - name: call_volume
     label: Call Volume
     model: ref('prep_phone_ticket_interactions')
@@ -256,18 +325,23 @@ metrics:
     meta:
       domain: cs
       category: volume
+      definition_long: >
+        Call Volume is the total count of distinct inbound or outbound phone calls handled by the contact center within a specified period.
+      business_purpose: >
+        Similar to Chat Volume, this is a core workload metric for the phone channel. It is essential for forecasting staffing requirements (workforce management), understanding customer contact patterns, and providing context for other phone-related KPIs like Average Handle Time and FCR.
+      calculation_logic: "COUNT(DISTINCT interaction_id)"
+      calculation_example: >
+        - Scenario: On a given Wednesday, the phone system registered 800 unique calls.
+        - Result: The Call Volume for that day is 800.
+      data_source_details:
+        model: prep_phone_ticket_interactions
+        columns:
+          - interaction_id
+      units: "Count of calls"
+      interpretation_notes: >
+        - A volume metric that provides the scale of operations for the phone channel.
+        - Often analyzed by time of day, day of week, and compared against forecasts to measure planning accuracy.
 
-  # 1. Metric Name: Phone Readiness
-  # Definition: Proportion of time spent in any state other than phone not ready state relative to scheduled phone time
-  # 
-  # 2. Calculation Logic:
-  # 1 - ((sum(notready_time)) / sum(scheduled_time_phone))
-  #
-  # 3. Data Source(s): dim_cs_agent_scorecard (columns: notready_time, scheduled_time_phone)
-  #
-  # 4. Units: Ratio (0-1)
-  #
-  # 5. Dimensions: Can be analyzed by agent, team, day, week, month, quarter, year
   - name: phone_readiness
     label: Phone Readiness Rate
     model: ref('dim_cs_agent_scorecard')
@@ -282,18 +356,26 @@ metrics:
     meta:
       domain: cs
       category: phone_performance
+      definition_long: >
+        Phone Readiness measures the percentage of an agent's scheduled phone time that they are actually available to take calls. It is calculated by taking the total scheduled phone time and subtracting any time spent in a 'Not Ready' status.
+      business_purpose: >
+        This KPI is vital for ensuring the phone queue is adequately staffed. It helps managers understand if agents are available as scheduled or if they are spending excessive time in states that prevent them from receiving calls. It's a key lever for controlling service levels and customer wait times.
+      calculation_logic: "1 - (SUM(Time in 'Not Ready' status) / SUM(Total time scheduled for phone))"
+      calculation_example: >
+        - Scenario: An agent is scheduled for 4 hours of phone time (14,400 seconds).
+        - Not Ready Time: The agent spent 30 minutes (1,800 seconds) in a 'Not Ready' state.
+        - Calculation: `1 - (1800 / 14400) = 1 - 0.125 = 0.875`
+        - Result: The agent's Phone Readiness was 87.5%.
+      data_source_details:
+        model: dim_cs_agent_scorecard
+        columns:
+          - notready_time (in seconds)
+          - scheduled_time_phone (in seconds)
+      units: "Ratio (0.00 to 1.00), presented as a percentage (e.g., 87.5%)."
+      interpretation_notes: >
+        - A high rate is desirable. Low readiness directly impacts the call center's ability to answer calls promptly.
+        - Reasons for 'Not Ready' time should be categorized and analyzed to see if they are legitimate (e.g., post-call work, coaching) or problematic.
 
-  # 1. Metric Name: On Call Rate
-  # Definition: Proportion of time spent in on call state relative to productive scheduled phone time
-  # 
-  # 2. Calculation Logic:
-  # sum(on_call_time) / sum(scheduled_time_phone)
-  #
-  # 3. Data Source(s): dim_cs_agent_scorecard (columns: on_call_time, scheduled_time_phone)
-  #
-  # 4. Units: Ratio (0-1)
-  #
-  # 5. Dimensions: Can be analyzed by agent, team, day, week, month, quarter, year
   - name: on_call_rate
     label: On Call Rate
     model: ref('dim_cs_agent_scorecard')
@@ -308,18 +390,26 @@ metrics:
     meta:
       domain: cs
       category: phone_performance
+      definition_long: >
+        On Call Rate is a channel-specific occupancy metric. It measures the percentage of an agent's scheduled phone time that is spent actively engaged with a customer on a call (including talk time and hold time).
+      business_purpose: >
+        This metric indicates how utilized agents are specifically within the phone channel. It helps managers gauge workload and efficiency for phone-dedicated staff. It can help determine if the phone team is over- or under-staffed relative to the incoming call volume.
+      calculation_logic: "SUM(Total time on call) / SUM(Total time scheduled for phone)"
+      calculation_example: >
+        - Scenario: An agent is scheduled for 4 hours of phone time (14,400 seconds).
+        - On Call Time: The agent spent a total of 3 hours (10,800 seconds) on calls (talking or holding).
+        - Calculation: `10800 / 14400 = 0.75`
+        - Result: The agent's On Call Rate was 75%.
+      data_source_details:
+        model: dim_cs_agent_scorecard
+        columns:
+          - on_call_time (numerator, in seconds)
+          - scheduled_time_phone (denominator, in seconds)
+      units: "Ratio (0.00 to 1.00), presented as a percentage (e.g., 75%)."
+      interpretation_notes: >
+        - Unlike readiness, a very high On Call Rate can be a negative sign of burnout, similar to overall Occupancy.
+        - A rate that is too low suggests overstaffing or low call volume.
 
-  # 1. Metric Name: Average CSAT Score
-  # Definition: Average customer satisfaction score received
-  # 
-  # 2. Calculation Logic:
-  # AVG(csat_score_given)
-  #
-  # 3. Data Source(s): dim_ticket_summary_slim (columns: csat_score_given, last_solved_date)
-  #
-  # 4. Units: Score (typically 1-5)
-  #
-  # 5. Dimensions: Can be analyzed by ticket, agent, team, client, day, week, month, quarter, year
   - name: avg_csat_score
     label: Average CSAT Score
     model: ref('dim_ticket_summary_slim')
@@ -336,24 +426,33 @@ metrics:
     meta:
       domain: cs
       category: satisfaction
+      definition_long: >
+        The Average Customer Satisfaction (CSAT) Score is a transactional metric that represents the mean satisfaction level reported by customers following a specific interaction or ticket resolution. It is typically captured via a post-interaction survey asking a question like, "How satisfied were you with the support you received?" with responses on a numerical scale (e.g., 1-5 or 1-10).
+      business_purpose: >
+        CSAT is a direct measure of the quality of customer service from the customer's perspective. It provides immediate feedback on agent performance, product issues, and process effectiveness. Tracking the average score helps leadership gauge overall service quality, identify high-performing agents and teams for recognition, and pinpoint areas or individuals requiring coaching and improvement. Trends in CSAT can be leading indicators of customer churn or loyalty.
+      calculation_logic: "SUM(All CSAT scores received) / COUNT(Total number of CSAT responses received)"
+      calculation_example: >
+        - Scenario: Over one day, the team receives 5 CSAT survey responses for solved tickets.
+        - Scores Received: The scores are 5, 4, 5, 3, and 5.
+        - Calculation: `(5 + 4 + 5 + 3 + 5) / 5 = 22 / 5 = 4.4`
+        - Result: The Average CSAT Score for the day is 4.4 out of 5.
+      data_source_details:
+        model: dim_ticket_summary_slim
+        columns:
+          - csat_score_given
+          - last_solved_date
+      units: "Score on a defined scale (e.g., a 4.4 on a 1-5 scale)."
+      interpretation_notes: >
+        - A higher score is universally better. The target value depends on the scale used (e.g., >4.2 on a 5-point scale is often considered good).
+        - It's crucial to also track the response rate (CSAT Coverage), as a high score with a very low response rate may not be representative of the entire customer base.
+        - This metric reflects a specific interaction, not overall brand loyalty (which is better measured by NPS).
 
-  # 1. Metric Name: CSAT Responses
-  # Definition: Total number of CSAT responses received
-  # 
-  # 2. Calculation Logic:
-  # COUNT(case when csat_score_given is not null then csat_score_given else null end)
-  #
-  # 3. Data Source(s): dim_ticket_summary_slim (columns: csat_score_given, last_solved_date)
-  #
-  # 4. Units: Count
-  #
-  # 5. Dimensions: Can be analyzed by ticket, agent, team, client, day, week, month, quarter, year
   - name: csat_responses
     label: CSAT Responses
     model: ref('dim_ticket_summary_slim')
     description: Total number of CSAT responses received
     type: count
-    sql: case when csat_score_given is not null then csat_score_given else null end
+    sql: case when csat_score_given is not null then ticket_id else null end
     timestamp: last_solved_date
     time_grains: [day, week, month, quarter, year]
     dimensions:
@@ -364,24 +463,30 @@ metrics:
     meta:
       domain: cs
       category: satisfaction
+      definition_long: >
+        This metric is a simple count of the total number of customer satisfaction surveys that have been completed and returned by customers within a given time period.
+      business_purpose: >
+        CSAT Responses provides the sample size for all other CSAT-related metrics (like Average Score and CSAT 5 Rate). It's the numerator for calculating the CSAT Coverage Rate. A higher number of responses increases the statistical significance and reliability of the satisfaction data.
+      calculation_logic: "COUNT(tickets where csat_score_given is not null)"
+      calculation_example: >
+        - Scenario: 500 CSAT surveys were sent out to customers in a week.
+        - Completed Surveys: 120 customers filled out and submitted the survey.
+        - Result: The number of CSAT Responses is 120.
+      data_source_details:
+        model: dim_ticket_summary_slim
+        columns:
+          - csat_score_given
+          - ticket_id
+      units: "Count of responses"
+      interpretation_notes: >
+        - This is a volume metric. While higher is generally better for data quality, the primary goal is to ensure the response rate is sufficient for representative analysis.
 
-  # 1. Metric Name: CSAT 5 Count
-  # Definition: Total number of CSAT responses with a score of 5
-  # 
-  # 2. Calculation Logic:
-  # COUNT(case when csat_score_given = 5 then csat_score_given else null end)
-  #
-  # 3. Data Source(s): dim_ticket_summary_slim (columns: csat_score_given, last_solved_date)
-  #
-  # 4. Units: Count
-  #
-  # 5. Dimensions: Can be analyzed by ticket, agent, team, client, day, week, month, quarter, year
   - name: csat_score_5
     label: CSAT 5 Count
     model: ref('dim_ticket_summary_slim')
     description: Total number of CSAT responses with a score of 5
     type: count
-    sql: case when csat_score_given = 5 then csat_score_given else null end
+    sql: case when csat_score_given = 5 then ticket_id else null end
     timestamp: last_solved_date
     time_grains: [day, week, month, quarter, year]
     dimensions:
@@ -392,25 +497,31 @@ metrics:
     meta:
       domain: cs
       category: satisfaction
+      definition_long: >
+        This metric is a count of the total number of CSAT responses that received the highest possible score (a '5' on a 1-5 scale). This is often referred to as the "top box" score.
+      business_purpose: >
+        Tracking the count of perfect scores helps identify instances of truly excellent service. It serves as the numerator for the 'CSAT 5 Rate' and is a key input for agent recognition and reward programs. It highlights the volume of exceptional customer experiences being delivered.
+      calculation_logic: "COUNT(tickets where csat_score_given = 5)"
+      calculation_example: >
+        - Scenario: 120 CSAT responses were received in a week.
+        - Perfect Scores: Upon review, 75 of those responses had a score of '5'.
+        - Result: The CSAT 5 Count is 75.
+      data_source_details:
+        model: dim_ticket_summary_slim
+        columns:
+          - csat_score_given
+          - ticket_id
+      units: "Count of responses"
+      interpretation_notes: >
+        - A volume metric used primarily for calculating the CSAT 5 Rate. A higher number is always positive.
 
-  # 1. Metric Name: CSAT 5 Rate
-  # Definition: Proportion of CSAT scores that are 5 (excellent)
-  # 
-  # 2. Calculation Logic:
-  # csat_score_5 / csat_responses
-  #
-  # 3. Data Source(s): Derived from csat_score_5 and csat_responses metrics
-  #
-  # 4. Units: Ratio (0-1)
-  #
-  # 5. Dimensions: Can be analyzed by ticket, agent, team, client, day, week, month, quarter, year
   - name: csat_5_rate
     label: CSAT 5 Rate
     model: ref('dim_ticket_summary_slim')
     description: Proportion of CSAT scores that are 5 (excellent)
     type: ratio
     sql: {{ metric('csat_score_5') }} / nullif({{ metric('csat_responses') }}, 0)
-    timestamp: summary_date
+    timestamp: last_solved_date
     time_grains: [day, week, month, quarter, year]
     dimensions:
       - ticket
@@ -420,18 +531,24 @@ metrics:
     meta:
       domain: cs
       category: satisfaction
+      definition_long: >
+        The CSAT 5 Rate, or "Top Box Rate," is the percentage of all customer satisfaction responses that received the highest possible score (e.g., 5 out of 5).
+      business_purpose: >
+        This metric measures the consistency of delivering excellent service, going beyond the average score. A high CSAT 5 Rate indicates that a large proportion of customer interactions are not just satisfactory, but exceptional. It's a powerful indicator of high-quality service and can be a more sensitive measure of performance than the overall average.
+      calculation_logic: "Total Count of CSAT Score 5 / Total Count of CSAT Responses"
+      calculation_example: >
+        - Scenario: The team received 75 '5-star' ratings from a total of 120 survey responses.
+        - Calculation: `75 / 120 = 0.625`
+        - Result: The CSAT 5 Rate is 62.5%.
+      data_source_details:
+        model: dim_ticket_summary_slim (via derived metrics)
+        columns:
+          - N/A (Derived from `csat_score_5` and `csat_responses`)
+      units: "Ratio (0.00 to 1.00), presented as a percentage (e.g., 62.5%)."
+      interpretation_notes: >
+        - Higher is always better. It signifies a team's ability to consistently delight customers.
+        - A team could have a good average CSAT score but a low CSAT 5 Rate, indicating performance is consistently "good" but rarely "great."
 
-  # 1. Metric Name: CSAT Coverage Rate
-  # Definition: Percentage of all solved tickets with a CSAT response
-  # 
-  # 2. Calculation Logic:
-  # csat_responses / tickets_solved
-  #
-  # 3. Data Source(s): Derived from csat_responses and tickets_solved metrics
-  #
-  # 4. Units: Ratio (0-1)
-  #
-  # 5. Dimensions: Can be analyzed by ticket, agent, team, client, day, week, month, quarter, year
   - name: csat_coverage_rate
     label: CSAT Coverage Rate
     model: ref('dim_ticket_summary_slim')
@@ -448,18 +565,24 @@ metrics:
     meta:
       domain: cs
       category: satisfaction
+      definition_long: >
+        The CSAT Coverage Rate measures the percentage of all resolved customer support tickets for which a CSAT survey response was received. It essentially calculates the survey response rate.
+      business_purpose: >
+        This metric is crucial for understanding the statistical validity of all CSAT-related data. A low coverage rate means that satisfaction scores are based on a small, potentially biased sample of customers, making the results less representative of the true overall customer experience. Tracking this helps diagnose issues with survey delivery or customer survey fatigue.
+      calculation_logic: "Total Count of CSAT Responses / Total Count of Solved Tickets"
+      calculation_example: >
+        - Scenario: In one month, the team solved 10,000 tickets and received 1,500 CSAT survey responses.
+        - Calculation: `1,500 / 10,000 = 0.15`
+        - Result: The CSAT Coverage Rate is 15%.
+      data_source_details:
+        model: dim_ticket_summary_slim (via derived metrics)
+        columns:
+          - N/A (Derived from `csat_responses` and `tickets_solved`)
+      units: "Ratio (0.00 to 1.00), presented as a percentage (e.g., 15%)."
+      interpretation_notes: >
+        - There's no universal "good" rate, but higher is better for data confidence. A rate below 5-10% might call the validity of CSAT scores into question.
+        - A sudden drop can indicate technical problems with the survey distribution system.
 
-  # 1. Metric Name: Tickets Solved
-  # Definition: Total number of tickets solved
-  # 
-  # 2. Calculation Logic:
-  # COUNT(case when status in ('solved', 'closed') then ticket_id else null end)
-  #
-  # 3. Data Source(s): dim_ticket_summary_slim (columns: ticket_id, status, last_solved_date)
-  #
-  # 4. Units: Count
-  #
-  # 5. Dimensions: Can be analyzed by ticket, agent, team, client, day, week, month, quarter, year
   - name: tickets_solved
     label: Solved Tickets
     model: ref('dim_ticket_summary_slim')
@@ -476,18 +599,25 @@ metrics:
     meta:
       domain: cs
       category: tickets
+      definition_long: >
+        This is a count of the total number of customer support tickets that were moved into a terminal 'Solved' or 'Closed' status during a given period. It represents the team's total output.
+      business_purpose: >
+        Tickets Solved is a primary measure of team productivity and throughput. It helps managers understand workload capacity and performance against goals. It also serves as a critical denominator for other metrics, such as the CSAT Coverage Rate.
+      calculation_logic: "COUNT(DISTINCT tickets where status is 'solved' or 'closed')"
+      calculation_example: >
+        - Scenario: We are measuring the output of Team A for the week.
+        - Data: The team moved 520 unique tickets to a 'solved' state.
+        - Result: The number of Tickets Solved is 520.
+      data_source_details:
+        model: dim_ticket_summary_slim
+        columns:
+          - ticket_id
+          - status
+          - last_solved_date
+      units: "Count of tickets"
+      interpretation_notes: >
+        - A volume metric that reflects team output. More is generally better, but it must be balanced with quality metrics like CSAT and FCR to ensure agents are not rushing to close tickets improperly.
 
-  # 1. Metric Name: Ticket Count
-  # Definition: Total number of tickets created
-  # 
-  # 2. Calculation Logic:
-  # COUNT(ticket_id)
-  #
-  # 3. Data Source(s): dim_ticket_summary_slim (columns: ticket_id, ticket_created_at)
-  #
-  # 4. Units: Count
-  #
-  # 5. Dimensions: Can be analyzed by ticket, agent, team, client, day, week, month, quarter, year
   - name: ticket_count
     label: Total Tickets
     model: ref('dim_ticket_summary_slim')
@@ -504,18 +634,24 @@ metrics:
     meta:
       domain: cs
       category: tickets
+      definition_long: >
+        This metric is a raw count of all new support tickets created within a specific time frame, regardless of their channel, type, or status.
+      business_purpose: >
+        Ticket Count is the primary measure of incoming demand for support. It is fundamental for capacity planning, staffing level adjustments, and understanding the overall support workload. Comparing it to 'Tickets Solved' gives a high-level view of whether the team is keeping up with demand (i.e., managing the backlog).
+      calculation_logic: "COUNT(DISTINCT ticket_id)"
+      calculation_example: >
+        - Scenario: On Monday, customers and internal systems created 600 new support tickets.
+        - Result: The Ticket Count for Monday is 600.
+      data_source_details:
+        model: dim_ticket_summary_slim
+        columns:
+          - ticket_id
+          - ticket_created_at
+      units: "Count of tickets"
+      interpretation_notes: >
+        - A volume metric. A spike in ticket count can indicate a product outage, a new bug, or the result of a marketing campaign.
+        - Analyzing trends in this metric is crucial for proactive support management.
 
-  # 1. Metric Name: Average Handle Time
-  # Definition: Average time to handle and resolve tickets
-  # 
-  # 2. Calculation Logic:
-  # AVG(handle_time)
-  #
-  # 3. Data Source(s): dim_ticket_summary_slim (columns: handle_time, last_solved_date)
-  #
-  # 4. Units: Time (typically seconds or minutes)
-  #
-  # 5. Dimensions: Can be analyzed by ticket, agent, team, client, day, week, month, quarter, year
   - name: avg_handle_time
     label: Average Handle Time
     model: ref('dim_ticket_summary_slim')
@@ -532,18 +668,25 @@ metrics:
     meta:
       domain: cs
       category: performance
+      definition_long: >
+        Average Handle Time (AHT) is the average duration of a single customer interaction from start to finish. For calls, this typically includes talk time, hold time, and after-call work. For tickets, it can represent the total agent touch time required to resolve the issue.
+      business_purpose: >
+        AHT is a classic contact center metric used to measure operational efficiency. It directly impacts staffing models and cost per contact. While a lower AHT can mean greater efficiency, it must be carefully balanced against quality metrics (CSAT, FCR) to ensure that speed is not compromising the quality of service.
+      calculation_logic: "SUM(Total handle time for all tickets) / COUNT(Total number of tickets)"
+      calculation_example: >
+        - Scenario: An agent handles three tickets.
+        - Times: Ticket 1 took 10 mins, Ticket 2 took 20 mins, Ticket 3 took 15 mins.
+        - Calculation: `(10 + 20 + 15) / 3 = 15 minutes`
+        - Result: The agent's Average Handle Time is 15 minutes.
+      data_source_details:
+        model: dim_ticket_summary_slim
+        columns:
+          - handle_time
+      units: "Time (typically seconds or minutes)"
+      interpretation_notes: >
+        - Lower AHT is often a goal, but pursuing it aggressively can lead to negative outcomes like poor resolutions and low customer satisfaction.
+        - It's a key input for workforce management forecasting.
 
-  # 1. Metric Name: Average First Response Time
-  # Definition: Average time from ticket creation to first agent response
-  # 
-  # 2. Calculation Logic:
-  # AVG(avg_first_response_time)
-  #
-  # 3. Data Source(s): dim_ticket_summary_slim (columns: avg_first_response_time, last_solved_date)
-  #
-  # 4. Units: Time (typically seconds or minutes)
-  #
-  # 5. Dimensions: Can be analyzed by ticket, agent, team, client, day, week, month, quarter, year
   - name: avg_first_response_time
     label: Average First Response Time
     model: ref('dim_ticket_summary_slim')
@@ -560,18 +703,25 @@ metrics:
     meta:
       domain: cs
       category: performance
+      definition_long: >
+        Average First Response Time (AFRT) measures the average elapsed time between when a customer creates a ticket and when an agent provides the first non-automated response.
+      business_purpose: >
+        AFRT is a critical measure of a support team's responsiveness and directly impacts the customer experience. A long wait for an initial response can lead to customer frustration and the perception of poor service. This metric is often part of external Service Level Agreements (SLAs).
+      calculation_logic: "AVERAGE(timestamp_of_first_agent_response - timestamp_of_ticket_creation)"
+      calculation_example: >
+        - Scenario: Two tickets are created.
+        - Times: Ticket 1 is created at 9:00 AM and gets a response at 9:30 AM (30 min wait). Ticket 2 is created at 10:00 AM and gets a response at 11:30 AM (90 min wait).
+        - Calculation: `(30 minutes + 90 minutes) / 2 = 60 minutes`
+        - Result: The Average First Response Time is 60 minutes.
+      data_source_details:
+        model: dim_ticket_summary_slim
+        columns:
+          - avg_first_response_time
+      units: "Time (typically seconds, minutes, or hours)"
+      interpretation_notes: >
+        - Lower is always better. The target often varies by channel (e.g., minutes for chat, hours for email).
+        - This metric is a key indicator of how well a team is staffed to handle incoming volume.
 
-  # 1. Metric Name: Average QA Score
-  # Definition: Average quality assurance score received
-  # 
-  # 2. Calculation Logic:
-  # AVG(avg_qa_score)
-  #
-  # 3. Data Source(s): prep_cx_level_ai_qa_scores (columns: avg_qa_score, last_solved_date)
-  #
-  # 4. Units: Score (typically percentage or scale, e.g., 0-100)
-  #
-  # 5. Dimensions: Can be analyzed by interaction, ticket, agent, team, client, day, week, month, quarter, year
   - name: avg_qa_score
     label: Average QA Score
     model: ref('prep_cx_level_ai_qa_scores')
@@ -589,18 +739,25 @@ metrics:
     meta:
       domain: cs
       category: quality
+      definition_long: >
+        The Average Quality Assurance (QA) Score is the average score agents receive from internal quality reviewers. These reviews are typically conducted by a dedicated QA team or managers who grade interactions against a scorecard of criteria, such as procedural adherence, accuracy of information, and soft skills.
+      business_purpose: >
+        QA scores provide an internal, standardized measure of service quality and process compliance. Unlike CSAT, which measures customer perception, QA measures adherence to business standards. It is a vital tool for agent coaching, identifying training needs, and ensuring a consistent and high-quality customer experience.
+      calculation_logic: "SUM(All individual QA scores) / COUNT(Total number of QA evaluations)"
+      calculation_example: >
+        - Scenario: An agent had two interactions evaluated in a month.
+        - Scores: Evaluation 1 received a score of 95%. Evaluation 2 received a score of 88%.
+        - Calculation: `(95 + 88) / 2 = 91.5`
+        - Result: The agent's Average QA Score is 91.5%.
+      data_source_details:
+        model: prep_cx_level_ai_qa_scores
+        columns:
+          - avg_qa_score
+      units: "Score (typically a percentage from 0-100)"
+      interpretation_notes: >
+        - Higher is always better, indicating strong alignment with company quality standards.
+        - It should be analyzed alongside CSAT to ensure that internal standards align with what actually satisfies customers.
 
-  # 1. Metric Name: QA Evaluations
-  # Definition: Number of interactions evaluated by QA
-  # 
-  # 2. Calculation Logic:
-  # SUM(qa_count)
-  #
-  # 3. Data Source(s): dim_cs_agent_scorecard (columns: qa_count, summary_date)
-  #
-  # 4. Units: Count
-  #
-  # 5. Dimensions: Can be analyzed by interaction, ticket, agent, team, client, day, week, month, quarter, year
   - name: qa_count
     label: QA Evaluations
     model: ref('dim_cs_agent_scorecard')
@@ -618,18 +775,22 @@ metrics:
     meta:
       domain: cs
       category: quality
+      definition_long: >
+        This metric is a count of the total number of quality assurance evaluations performed on agent interactions within a specific period.
+      business_purpose: >
+        QA Count measures the coverage and reach of the quality assurance program. It ensures that a sufficient and representative sample of interactions is being reviewed for each agent and team. This is important for the statistical validity of the average QA scores and for ensuring all agents receive regular feedback.
+      calculation_logic: "SUM(qa_count) or COUNT(distinct evaluation_id)"
+      calculation_example: >
+        - Scenario: A company's policy is to evaluate 4 interactions per agent per month. For a team of 50 agents, this would be 200 evaluations.
+        - Result: The target QA Count is 200 for the month.
+      data_source_details:
+        model: dim_cs_agent_scorecard
+        columns:
+          - qa_count
+      units: "Count of evaluations"
+      interpretation_notes: >
+        - This is a volume/target metric. The goal is to meet the planned number of evaluations to ensure fair and comprehensive quality monitoring.
 
-  # 1. Metric Name: Web Interaction Volume
-  # Definition: Total number of web interactions
-  # 
-  # 2. Calculation Logic:
-  # COUNT(interaction_id)
-  #
-  # 3. Data Source(s): prep_web_ticket_interactions (columns: interaction_id, interacted_at)
-  #
-  # 4. Units: Count
-  #
-  # 5. Dimensions: Can be analyzed by interaction, day, week, month, quarter, year
   - name: web_volume
     label: Web Interaction Volume
     model: ref('prep_web_ticket_interactions')
@@ -643,27 +804,30 @@ metrics:
     meta:
       domain: cs
       category: volume
+      definition_long: >
+        This metric is a count of the total number of interactions received through web-based channels, such as 'Contact Us' forms or direct email inboxes.
+      business_purpose: >
+        This metric helps quantify the demand on asynchronous support channels. It's used for staffing, forecasting, and understanding which channels customers prefer to use. It provides the volume context for web-channel-specific metrics like response time or resolution time.
+      calculation_logic: "COUNT(DISTINCT interaction_id)"
+      calculation_example: >
+        - Scenario: Over a 24-hour period, 300 customers submitted a query through the website's contact form.
+        - Result: The Web Volume for the day is 300.
+      data_source_details:
+        model: prep_web_ticket_interactions
+        columns:
+          - interaction_id
+      units: "Count of interactions"
+      interpretation_notes: >
+        - This is a volume metric used for workload planning and channel analysis.
 
   # =============================================================================
   # TRANSFERS DOMAIN METRICS
   # =============================================================================
-
-  # 1. Metric Name: Account Value
-  # Definition: Value of the client's account involved in the transfer, indicating business importance and risk level
-  # 
-  # 2. Calculation Logic:
-  # SUM(account_value)
-  #
-  # 3. Data Source(s): money_movement__dim_accounts (columns: account_value, transitioned_date)
-  #
-  # 4. Units: Currency (USD)
-  #
-  # 5. Dimensions: Can be analyzed by transfer, day, week, month, quarter, year
   - name: account_value
     label: Account Value
     model: ref('money_movement__dim_accounts')
     description: >
-      Value of the client's account involved in the transfer, 
+      Value of the client's account involved in the transfer,
       indicating business importance and risk level.
     type: sum
     sql: account_value
@@ -674,24 +838,29 @@ metrics:
     meta:
       domain: transfers
       category: financial
+      definition_long: >
+        Account Value represents the total monetary value of the client's account that is being moved in a transfer operation. This metric can be aggregated to show the total value of assets in motion during a specific period.
+      business_purpose: >
+        This metric is a key indicator of the financial significance of transfer operations. It is used for risk assessment, prioritization of high-value transfers, and reporting to leadership on the scale of business being handled. It helps to contextualize the importance of the transfer process to the company's bottom line.
+      calculation_logic: "SUM(account_value)"
+      calculation_example: >
+        - Scenario: Three transfers are processed in one day.
+        - Values: Transfer A is for an account worth $1,000,000. Transfer B is for an account worth $2,500,000. Transfer C is for an account worth $500,000.
+        - Calculation: `1,000,000 + 2,500,000 + 500,000 = $4,000,000`
+        - Result: The total Account Value transferred that day is $4,000,000.
+      data_source_details:
+        model: money_movement__dim_accounts
+        columns:
+          - account_value
+      units: "Currency (USD)"
+      interpretation_notes: >
+        - A volume-based financial metric. It's not a performance indicator on its own but provides critical business context for other performance metrics like Transfer Duration.
 
-  # 1. Metric Name: Transfer Duration (Days)
-  # Definition: Total duration of the full transfer lifecycle from first state to terminal state
-  # 
-  # 2. Calculation Logic:
-  # AVG(datediff('days', transfer_created_at, cal_mapping_end_date::date))
-  #
-  # 3. Data Source(s): money_movement__fct_institutional_transfer_state_histories 
-  #                    (columns: transfer_created_at, cal_mapping_end_date, transitioned_date)
-  #
-  # 4. Units: Days
-  #
-  # 5. Dimensions: Can be analyzed by transfer, day, week, month, quarter, year
   - name: transfer_duration_days
     label: Transfer Duration (Days)
     model: ref('money_movement__fct_institutional_transfer_state_histories')
     description: >
-      Total duration of the full transfer lifecycle from 
+      Total duration of the full transfer lifecycle from
       first state to terminal state.
     type: average
     sql: datediff('days', transfer_created_at, cal_mapping_end_date::date)
@@ -702,24 +871,34 @@ metrics:
     meta:
       domain: transfers
       category: performance
+      definition_long: >
+        Transfer Duration is a performance metric that calculates the average elapsed time, in days, for a financial transfer to complete its entire lifecycle. The duration is measured from the moment the transfer process is initiated (creation date) to the moment it reaches a final, terminal state (e.g., 'Completed', 'Cancelled', 'Failed').
+      business_purpose: >
+        This metric is a critical indicator of the efficiency and speed of the transfer process. A shorter duration generally leads to higher customer satisfaction, reduced operational overhead, and lower financial risk. Monitoring this KPI helps the business identify bottlenecks in the transfer workflow, assess the impact of process changes, and set realistic service level agreements (SLAs) with clients.
+      calculation_logic: "For each completed transfer, calculate: DATEDIFF('day', creation_timestamp, terminal_state_timestamp). The final metric is the AVERAGE of these individual durations over a given period."
+      calculation_example: >
+        - Scenario: We are analyzing three transfers that completed in the last month.
+        - Transfer A: Created Jan 1, Completed Jan 10. Duration = 9 days.
+        - Transfer B: Created Jan 5, Completed Jan 9. Duration = 4 days.
+        - Transfer C: Created Jan 8, Completed Jan 20. Duration = 12 days.
+        - Calculation: `(9 + 4 + 12) / 3 = 25 / 3 = 8.33`
+        - Result: The average transfer duration for the period is 8.33 days.
+      data_source_details:
+        model: money_movement__fct_institutional_transfer_state_histories
+        columns:
+          - transfer_created_at (start of duration)
+          - cal_mapping_end_date (end of duration for a terminal state)
+      units: "Days"
+      interpretation_notes: >
+        - A lower number is universally better, indicating a faster and more efficient process.
+        - It's important to segment this metric by transfer type, contra-firm, or value, as different transfer types may have inherently different expected durations.
+        - Outliers with extremely long durations should be investigated individually as they may represent significant process failures or complex edge cases.
 
-  # 1. Metric Name: Days in State
-  # Definition: Number of days the transfer has remained in its current status without transitioning to a new state
-  # 
-  # 2. Calculation Logic:
-  # SUM(datediff('days', transitioned_date, next_state_transitioned_at))
-  #
-  # 3. Data Source(s): money_movement__fct_institutional_transfer_state_histories 
-  #                    (columns: transitioned_date, next_state_transitioned_at)
-  #
-  # 4. Units: Days
-  #
-  # 5. Dimensions: Can be analyzed by transfer, day, week, month, quarter, year
   - name: days_in_state
     label: Days in Current State
     model: ref('money_movement__fct_institutional_transfer_state_histories')
     description: >
-      Number of days the transfer has remained in its current 
+      Number of days the transfer has remained in its current
       status without transitioning to a new state.
     type: sum
     sql: datediff('days', transitioned_date, next_state_transitioned_at)
@@ -730,19 +909,25 @@ metrics:
     meta:
       domain: transfers
       category: performance
+      definition_long: >
+        This metric measures the time, in days, that a transfer spends in a single, discrete state before moving to the next one. It is used to analyze the efficiency of each step in the overall transfer workflow.
+      business_purpose: >
+        The primary purpose of tracking Days in State is to identify bottlenecks. By aggregating this metric by state, the business can see which steps in the process are taking the longest. For example, if transfers spend an average of 7 days in "Pending Documentation," it signals a clear area for process improvement.
+      calculation_logic: "For each state transition, calculate: DATEDIFF('day', entry_timestamp_of_current_state, entry_timestamp_of_next_state). This can be summed or averaged by state."
+      calculation_example: >
+        - Scenario: A transfer enters the 'Pending Approval' state on Jan 5th and moves to the 'Approved' state on Jan 8th.
+        - Calculation: `DATEDIFF('day', '2023-01-05', '2023-01-08') = 3`
+        - Result: The transfer spent 3 days in the 'Pending Approval' state.
+      data_source_details:
+        model: money_movement__fct_institutional_transfer_state_histories
+        columns:
+          - transitioned_date (start of state)
+          - next_state_transitioned_at (end of state)
+      units: "Days"
+      interpretation_notes: >
+        - This metric is most powerful when viewed in aggregate (average or median) for each state.
+        - High values for a particular state are a red flag for a process bottleneck that needs investigation.
 
-  # 1. Metric Name: SLA Breaches
-  # Definition: Count of transfers that have breached SLA thresholds
-  # 
-  # 2. Calculation Logic:
-  # COUNT(case when sla_flag = 1 then transfer_id else null end)
-  #
-  # 3. Data Source(s): money_movement__fct_institutional_transfer_state_histories 
-  #                    (columns: sla_flag, transfer_id, transitioned_date)
-  #
-  # 4. Units: Count
-  #
-  # 5. Dimensions: Can be analyzed by transfer, day, week, month, quarter, year
   - name: sla_breach_count
     label: SLA Breaches
     model: ref('money_movement__fct_institutional_transfer_state_histories')
@@ -756,19 +941,27 @@ metrics:
     meta:
       domain: transfers
       category: sla
+      definition_long: >
+        This metric provides a raw count of the number of individual transfers that have failed to meet their predefined Service Level Agreement (SLA) for overall completion time. An SLA breach occurs when the total duration of a transfer exceeds the contractually or internally agreed-upon timeframe.
+      business_purpose: >
+        Tracking SLA breaches is fundamental to risk management, client relationship management, and regulatory compliance. It provides a clear, unambiguous signal of service failures. A high or rising number of breaches necessitates immediate investigation to identify root causes, which could range from partner delays to internal process inefficiencies. This metric is often reported to leadership and clients as a key measure of service reliability.
+      calculation_logic: "COUNT(Distinct transfer_ids WHERE the sla_flag is marked as true or 1)"
+      calculation_example: >
+        - Scenario: In a given week, 1,000 transfers are processed.
+        - SLA Breach Identification: The data pipeline analyzes each transfer's duration against its specific SLA. It flags 15 unique transfers as having exceeded their SLA.
+        - Calculation: `COUNT(transfers where sla_flag = 1) = 15`
+        - Result: The SLA Breach Count for the week is 15.
+      data_source_details:
+        model: money_movement__fct_institutional_transfer_state_histories
+        columns:
+          - sla_flag (the boolean or integer indicating a breach)
+          - transfer_id (the entity being counted)
+      units: "Count of transfers"
+      interpretation_notes: >
+        - The goal is always to have this number be as close to zero as possible.
+        - This count should be viewed in context of the total transfer volume (i.e., as a percentage) to understand its relative severity.
+        - Analysis should be segmented by transfer type, partner, and value to pinpoint the source of the breaches.
 
-  # 1. Metric Name: State-Level SLA Breaches
-  # Definition: Count of state-level SLA breaches
-  # 
-  # 2. Calculation Logic:
-  # COUNT(case when state_sla_flag = 1 then transfer_id else null end)
-  #
-  # 3. Data Source(s): money_movement__fct_institutional_transfer_state_histories 
-  #                    (columns: state_sla_flag, transfer_id, transitioned_date)
-  #
-  # 4. Units: Count
-  #
-  # 5. Dimensions: Can be analyzed by transfer, day, week, month, quarter, year
   - name: state_sla_breach_count
     label: State-Level SLA Breaches
     model: ref('money_movement__fct_institutional_transfer_state_histories')
@@ -782,3 +975,22 @@ metrics:
     meta:
       domain: transfers
       category: sla
+      definition_long: >
+        State-Level SLA Breaches is a count of the number of times a transfer has exceeded the maximum allowed time within a specific step or 'state' of the process. A single transfer can have multiple state-level breaches even if it does not breach the overall transfer SLA.
+      business_purpose: >
+        This is a more granular diagnostic metric than the overall SLA breach count. It helps to pinpoint exactly which part of the transfer workflow is causing delays and failing to meet service standards. It allows for highly targeted process improvement efforts by identifying the specific bottleneck states.
+      calculation_logic: "COUNT(transfer state instances where the state_sla_flag is marked as true or 1)"
+      calculation_example: >
+        - Scenario: We analyze the performance of the 'Documentation Review' state.
+        - SLA: The SLA for this state is 2 business days.
+        - Data: We find 25 instances where transfers took more than 2 days to clear this state.
+        - Result: The State-Level SLA Breach Count for 'Documentation Review' is 25.
+      data_source_details:
+        model: money_movement__fct_institutional_transfer_state_histories
+        columns:
+          - state_sla_flag
+          - transfer_id
+      units: "Count of state-level breaches"
+      interpretation_notes: >
+        - The goal is zero.
+        - This metric is most valuable when analyzed per state, allowing managers to see which steps are the most problematic (e.g., "Documentation Review has 25 breaches, while 'Final Approval' only has 2").
