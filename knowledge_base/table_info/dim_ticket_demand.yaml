@@ -1,0 +1,132 @@
+table_name: dim_ticket_demand
+main_dttm_col: interaction_start_at
+description: One row per ticket or abandonment interaction. This includes all phone,
+  chat, and web tickets, as well as abandoned phone calls that did not become a ticket.
+default_endpoint: null
+offset: 0
+cache_timeout: null
+catalog: null
+schema: client_experience
+sql: SELECT * FROM pantheon.client_experience.dim_ticket_demand
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra:
+  unique_id: model.wealthsimple.dim_ticket_demand
+  depends_on: ref('dim_ticket_demand')
+  certification:
+    details: This table is produced by dbt
+normalize_columns: false
+always_filter_main_dttm: false
+folders: null
+uuid: c5d82dfe-53a5-48e3-86ae-89fb7d46a844
+metrics:
+- metric_name: count
+  verbose_name: COUNT(*)
+  metric_type: count
+  expression: COUNT(*)
+  description: null
+  d3format: null
+  currency: null
+  extra: null
+  warning_text: null
+columns:
+- column_name: interaction_id
+  verbose_name: interaction_id
+  is_dttm: false
+  is_active: true
+  type: STRING
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: Unique identifier for the interaction.
+  python_date_format: null
+  extra: null
+- column_name: interaction_start_at
+  verbose_name: null
+  is_dttm: true
+  is_active: true
+  type: DATETIME
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: inbound_outbound
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: STRING
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: cs_group
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: STRING
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: channel
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: STRING
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: pillar
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: STRING
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: is_abandoned
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: INT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: handle_time
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: null
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+version: 1.0.0
+database_uuid: 3c8514fd-233c-4cd2-8cf7-ac3f4104ee47

@@ -1,0 +1,979 @@
+table_name: dim_ticket_summary
+main_dttm_col: adjusted_rt
+description: One row per ticket. This unions chat, phone, and web tickets for a comprehensive
+  list. It only includes attributes that are common across all ticket types (ex. no
+  chat-specific attributes).
+default_endpoint: null
+offset: 0
+cache_timeout: null
+catalog: null
+schema: client_experience
+sql: ''
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra:
+  unique_id: model.wealthsimple.dim_ticket_summary
+  depends_on: ref('dim_ticket_summary')
+  certification:
+    details: This table is produced by dbt
+normalize_columns: true
+always_filter_main_dttm: false
+folders: null
+uuid: a636702c-8523-417e-9751-12de73e63e82
+metrics:
+- metric_name: count
+  verbose_name: COUNT(*)
+  metric_type: count
+  expression: COUNT(*)
+  description: null
+  d3format: null
+  currency: null
+  extra: null
+  warning_text: null
+columns:
+- column_name: client_tier_at_reachout
+  verbose_name: client_tier_at_reachout
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: 'Client''s tier level at the time they reached out for support. Possible
+    values are:
+
+    1. ''generation'' - Highest tier, typically for clients with $500,000+ in assets
+
+    2. ''premium'' - Second highest tier, typically for clients with $100,000-$500,000
+    in assets
+
+    3. ''trying premium'' - Clients in a premium trial period
+
+    4. ''core'' - Standard tier for regular clients
+
+    5. ''sub-threshold-core'' - Clients below the core threshold
+
+    6. ''non-client'' - For users who haven''t yet become clients
+
+    '
+  python_date_format: null
+  extra: null
+- column_name: pillar
+  verbose_name: pillar
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: 'Support team or department handling the ticket. Possible values are:
+
+    1. ''CS'' - Customer Service
+
+    2. ''Sales Ops'' - Sales Operations
+
+    3. ''Work'' - Work team
+
+    4. ''Gold Glove'' - Gold Glove team
+
+    5. ''Operations'' - Operations team
+
+    6. ''CS Operations'' - Customer Service Operations
+
+    7. ''PM'' - Product Management
+
+    8. ''Other'' - Other teams
+
+    9. ''Trade Desk'' - Trade Desk team
+
+    '
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: status
+  verbose_name: status
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: 'Current status of the ticket. Possible values are:
+
+    1. ''open'' - Ticket is being worked on
+
+    2. ''pending'' - Waiting for response or action
+
+    3. ''hold'' - Ticket is on hold
+
+    4. ''solved'' - Ticket has been resolved
+
+    5. ''closed'' - Ticket has been closed
+
+    6. ''deleted'' - Ticket has been deleted (typically spam)
+
+    '
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: account_types
+  verbose_name: account_types
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: "Comma-separated list of account types associated with the ticket,\
+    \ sourced from Zendesk ticket fields. \nValues include regular accounts (e.g.\
+    \ 'tfsa', 'rrsp', 'non_registered'), group accounts (e.g. 'group_tfsa', 'group_rrsp'),\
+    \ \nand other specialized accounts. Multiple account types are separated by ',\
+    \ ' and ordered by their original field index.\n"
+  python_date_format: null
+  extra: null
+- column_name: ext_cat_1
+  verbose_name: ext_cat_1
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: 'External-facing categories for the ticket, derived from ticket tags.
+    Multiple categories are separated by '' | '' and ordered alphabetically. Categories
+    are sourced from the cx_category_revamp_2022 reference and include only external-facing
+    categories with non-null tag tiers.
+
+    '
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: priority
+  verbose_name: priority
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: 'Priority level of the ticket. Possible values are:
+
+    1. ''urgent'' - Highest priority tickets
+
+    2. ''high'' - High priority tickets
+
+    3. ''normal'' - Standard priority tickets (default if not specified)
+
+    4. ''low'' - Low priority tickets
+
+    '
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: qa_score
+  verbose_name: qa_score
+  is_dttm: false
+  is_active: true
+  type: NUMERIC(38, 4)
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: 'Quality assurance score for the ticket, sourced from either:
+
+    1. MaestroQA - Average of rubric scores normalized by maximum possible score
+
+    2. Level AI - Raw score rounded to 2 decimal places
+
+    '
+  python_date_format: null
+  extra: null
+- column_name: subtopic
+  verbose_name: subtopic
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Detailed subcategory for the ticket, predicted by the ERNIE model.
+    This is the most specific level of categorization. 'ai_stp_n_a' indicates no applicable
+    subtopic.
+  python_date_format: null
+  extra: null
+- column_name: ces
+  verbose_name: ces
+  is_dttm: false
+  is_active: true
+  type: NUMERIC(16, 4)
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Customer effort score, normalized to a value between 0 and 1. Collected
+    through Typeform surveys on a 7-point scale.
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: topic
+  verbose_name: topic
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Main topic category for the ticket, predicted by the ERNIE model. This
+    is a subcategory of the parent_topic.
+  python_date_format: null
+  extra: null
+- column_name: parent_topic
+  verbose_name: parent_topic
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: High-level category for the ticket, predicted by the ERNIE model. This
+    is the broadest level of categorization.
+  python_date_format: null
+  extra: null
+- column_name: topic_probability
+  verbose_name: topic_probability
+  is_dttm: false
+  is_active: true
+  type: DOUBLE PRECISION
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Confidence score (0-1) for the topic prediction by ERNIE. A score of
+    0 indicates 'ai_tp_vague_or_irrelevant_text'.
+  python_date_format: null
+  extra: null
+- column_name: subtopic_probability
+  verbose_name: subtopic_probability
+  is_dttm: false
+  is_active: true
+  type: DOUBLE PRECISION
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Confidence score (0-1) for the subtopic prediction by ERNIE. A score
+    of 0 indicates 'ai_stp_n_a'.
+  python_date_format: null
+  extra: null
+- column_name: ticket_tags
+  verbose_name: ticket_tags
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: All tags associated with the ticket, aggregated from Zendesk ticket
+    tags and separated by commas
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: aum_at_reachout
+  verbose_name: aum_at_reachout
+  is_dttm: false
+  is_active: true
+  type: NUMERIC(38, 8)
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: Client's total assets under management (AUM) at the time they reached
+    out for support
+  python_date_format: null
+  extra: null
+- column_name: int_cat_1
+  verbose_name: int_cat_1
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Internal-facing categories with tag tier 2, separated by ' | ' and
+    ordered alphabetically
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: int_cat_2
+  verbose_name: int_cat_2
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Internal-facing categories with tag tier 3, separated by ' | ' and
+    ordered alphabetically
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: int_cat_3
+  verbose_name: int_cat_3
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Internal-facing categories with tag tier 4, separated by ' | ' and
+    ordered alphabetically
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: int_cat_4
+  verbose_name: int_cat_4
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Internal-facing categories with tag tier 5, separated by ' | ' and
+    ordered alphabetically
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: channel
+  verbose_name: channel
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Channel through which the ticket was created (chat, phone, or web)
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: first_forwarded_is_bpo
+  verbose_name: first_forwarded_is_bpo
+  is_dttm: false
+  is_active: true
+  type: BOOLEAN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Boolean indicating if the first forward was to a BPO agent
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: is_bpo
+  verbose_name: is_bpo
+  is_dttm: false
+  is_active: true
+  type: BOOLEAN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Boolean indicating if the ticket is handled by a BPO agent
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: first_forwarded_cs_agent_position_type
+  verbose_name: first_forwarded_cs_agent_position_type
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Position type of the first agent the ticket was forwarded to
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: most_recent_jira_eoc_problem_area
+  verbose_name: most_recent_jira_eoc_problem_area
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: End of chain problem area from the most recent Jira issue
+  python_date_format: null
+  extra: null
+- column_name: client_first_registered_date
+  verbose_name: client_first_registered_date
+  is_dttm: true
+  is_active: true
+  type: TIMESTAMP WITHOUT TIME ZONE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: Date when the client first registered with Wealthsimple
+  python_date_format: null
+  extra: null
+- column_name: ces_score_given
+  verbose_name: ces_score_given
+  is_dttm: false
+  is_active: true
+  type: INTEGER
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Raw customer effort score given in the survey (1-7 scale)
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: first_forwarded_is_premium
+  verbose_name: first_forwarded_is_premium
+  is_dttm: false
+  is_active: true
+  type: BOOLEAN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Boolean indicating if the first forward was to premium support
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: last_solved_date
+  verbose_name: last_solved_date
+  is_dttm: true
+  is_active: true
+  type: TIMESTAMP WITHOUT TIME ZONE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Date when the ticket was last solved
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: first_solved_at
+  verbose_name: first_solved_at
+  is_dttm: true
+  is_active: true
+  type: TIMESTAMP WITHOUT TIME ZONE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Timestamp when the ticket was first solved
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: has_jira
+  verbose_name: has_jira
+  is_dttm: false
+  is_active: true
+  type: INTEGER
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Boolean indicating if the ticket has a linked Jira issue
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: first_forwarded_cs_agent_id
+  verbose_name: first_forwarded_cs_agent_id
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Identifier of the first agent the ticket was forwarded to
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: first_forwarded_cs_agent
+  verbose_name: first_forwarded_cs_agent
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Name of the first agent the ticket was forwarded to
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: first_forwarded_cs_agent_position
+  verbose_name: first_forwarded_cs_agent_position
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Position of the first agent the ticket was forwarded to
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: most_recent_jira_project_key
+  verbose_name: most_recent_jira_project_key
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Key of the Jira project containing the most recent issue
+  python_date_format: null
+  extra: null
+- column_name: most_recent_jira_project_name
+  verbose_name: most_recent_jira_project_name
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Name of the Jira project containing the most recent issue
+  python_date_format: null
+  extra: null
+- column_name: is_premium
+  verbose_name: is_premium
+  is_dttm: false
+  is_active: true
+  type: BOOLEAN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Boolean indicating if this is a premium support ticket
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: close_date
+  verbose_name: close_date
+  is_dttm: true
+  is_active: true
+  type: TIMESTAMP WITHOUT TIME ZONE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Date when the ticket was closed
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: ticket_created_at
+  verbose_name: ticket_created_at
+  is_dttm: true
+  is_active: true
+  type: TIMESTAMP WITHOUT TIME ZONE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Timestamp when the ticket was created
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: first_cs_group_forwarded
+  verbose_name: first_cs_group_forwarded
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: First customer service group the ticket was forwarded to
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: ces_comment
+  verbose_name: ces_comment
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Optional comment provided in the customer effort score survey
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: client_tenure_type
+  verbose_name: client_tenure_type
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: Classification of client's tenure with Wealthsimple (e.g. 'new', 'existing')
+  python_date_format: null
+  extra: null
+- column_name: is_incident_ticket
+  verbose_name: is_incident_ticket
+  is_dttm: false
+  is_active: true
+  type: INTEGER
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Boolean indicating if this is an incident ticket
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: first_forwarded_team_lead
+  verbose_name: first_forwarded_team_lead
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: First team lead the ticket was forwarded to
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: cs_agent_position_type
+  verbose_name: cs_agent_position_type
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Type of position of the customer service agent
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: most_recent_jira_issue_key
+  verbose_name: most_recent_jira_issue_key
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Key of the most recent linked Jira issue
+  python_date_format: null
+  extra: null
+- column_name: handle_time
+  verbose_name: handle_time
+  is_dttm: false
+  is_active: true
+  type: NUMERIC(38, 10)
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Total time spent handling the ticket
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: inbound_outbound
+  verbose_name: inbound_outbound
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Direction of the ticket (inbound or outbound)
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: csat_score_given
+  verbose_name: csat_score_given
+  is_dttm: false
+  is_active: true
+  type: INTEGER
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Numerical score given in the CSAT survey
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: transfer_count
+  verbose_name: transfer_count
+  is_dttm: false
+  is_active: true
+  type: BIGINT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Number of times the ticket was transferred
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: first_reply_time
+  verbose_name: first_reply_time
+  is_dttm: false
+  is_active: true
+  type: BIGINT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Time taken to provide the first response
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: requester_identity_canonical_id
+  verbose_name: requester_identity_canonical_id
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Identity canonical ID of the ticket requester
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: first_forwarded_manager
+  verbose_name: first_forwarded_manager
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: First manager the ticket was forwarded to
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: first_forwarded_pillar
+  verbose_name: first_forwarded_pillar
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: First pillar the ticket was forwarded to
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: is_abandoned
+  verbose_name: is_abandoned
+  is_dttm: false
+  is_active: true
+  type: INTEGER
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Boolean indicating if the ticket was abandoned
+  python_date_format: null
+  extra: null
+- column_name: csat_comment
+  verbose_name: csat_comment
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Comment provided in the CSAT survey
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: requester_user_id
+  verbose_name: requester_user_id
+  is_dttm: false
+  is_active: true
+  type: BIGINT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: User ID of the ticket requester
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: cs_agent_id
+  verbose_name: cs_agent_id
+  is_dttm: false
+  is_active: true
+  type: BIGINT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Identifier of the customer service agent
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: time_to_last_resolution
+  verbose_name: time_to_last_resolution
+  is_dttm: false
+  is_active: true
+  type: BIGINT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Time taken to reach final resolution
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: time_to_first_resolution
+  verbose_name: time_to_first_resolution
+  is_dttm: false
+  is_active: true
+  type: BIGINT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Time taken to reach first resolution
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: cs_group
+  verbose_name: cs_group
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Customer service group handling the ticket
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: cs_agent
+  verbose_name: cs_agent
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Name of the customer service agent
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: cs_agent_position
+  verbose_name: cs_agent_position
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Position of the customer service agent
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: cs_agent_timezone
+  verbose_name: cs_agent_timezone
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: Timezone of the customer service agent
+  python_date_format: null
+  extra: null
+- column_name: ticket_id
+  verbose_name: ticket_id
+  is_dttm: false
+  is_active: true
+  type: BIGINT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Unique identifier for the ticket
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: team_lead
+  verbose_name: team_lead
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Team lead overseeing the ticket
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: manager
+  verbose_name: manager
+  is_dttm: false
+  is_active: true
+  type: UNKNOWN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Manager overseeing the ticket
+  python_date_format: null
+  extra:
+    warning_markdown: null
+- column_name: csat
+  verbose_name: csat
+  is_dttm: false
+  is_active: true
+  type: INTEGER
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: ''
+  description: Customer satisfaction score
+  python_date_format: null
+  extra:
+    warning_markdown: null
+version: 1.0.0
+database_uuid: 3c8514fd-233c-4cd2-8cf7-ac3f4104ee47
