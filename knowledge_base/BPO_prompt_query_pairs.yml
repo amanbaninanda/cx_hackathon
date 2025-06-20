@@ -1,0 +1,963 @@
+version: 2
+
+models:
+  - name: weekly_ticket_demand_by_channel
+    description: |
+      ### Model: Weekly Ticket Demand by Channel
+
+      **Purpose:** This model aggregates ticket interaction data to provide a weekly overview of customer support demand, segmented by communication channel. It is essential for understanding channel preference trends over time and helps in planning resource allocation for different support teams.
+
+      **Business Logic:**
+      - **Time Granularity:** Data is grouped by the week the interaction started, using `DATE_TRUNC`.
+      - **Channel Cleaning:** Raw communication channels are simplified into three primary categories for high-level analysis: 'phone', 'chat', and 'web'. The 'web' category serves as a catch-all for email, web forms, and other asynchronous channels.
+      - **Filtering:** The model focuses exclusively on tickets belonging to the 'CS' (Customer Support) pillar. It analyzes a rolling 18-week window from the current date to focus on recent trends.
+      - **Metric:** The primary metric is `ticket_volume`, which represents a distinct count of `interaction_id` for each channel per week. This ensures that each unique interaction is counted only once.
+      - **Data Source:** This model relies on a complex set of CTEs that join data from ticket demand, Zendesk, and internal mapping tables to correctly attribute interactions and classify tickets.
+
+      **Source Query:**
+      ```sql
+      WITH
+        premium_l1_tickets AS (
+          SELECT DISTINCT
+            ticket_id
+          FROM client_experience.dim_phone_ticket_interactions
+          WHERE
+            interaction_seq = 1
+            AND cs_group ILIKE '%premium%'
+            AND is_bpo
+            AND interaction_start_at::DATE >= '2024-08-26'
+        ),
+        l1l2_tickets AS (
+          SELECT DISTINCT
+            h.ticket_id
+          FROM zendesk.ticket_field_history AS h
+          LEFT JOIN
+            zendesk.ticket AS t
+            ON h.ticket_id = t.id
+          WHERE
+            h.value IN ('26916275861147', '26916276688411') -- Level 1, FR Level 1
+            AND CONVERT_TIMEZONE('America/Toronto', t.created_at::TIMESTAMP)::DATE > '2024-07-17'
+        ),
+        level1_web_triage_macro AS (
+          SELECT DISTINCT
+            ticket_id
+          FROM zendesk.ticket_macro_reference
+          WHERE
+            macro_id IN (27136102684443, 27136087449115)
+        ),
+        level1_web_triage_tickets AS (
+          SELECT DISTINCT
+            ticket_id
+          FROM zendesk.ticket_comment
+          WHERE
+            public
+            AND (
+              plain_body ILIKE '%As discussed, I will be passing your request over to the appropriate team for a follow-up%'
+              OR plain_body ILIKE '%They will be in touch as soon as possible%'
+              OR plain_body ILIKE '%Merci de nous avoir appelés aujourd’hui ! Pour faire suite à notre conversation, je vous informe que%votre demande à l%'
+              OR plain_body ILIKE '%équipe approprié qui sera en contact dans les plus brefs délais%'
+            )
+            AND ticket_id IN (
+              SELECT ticket_id FROM level1_web_triage_macro
+            )
+        ),
+        credit_card_tickets AS (
+          SELECT DISTINCT
+            id AS ticket_id
+          FROM zendesk.ticket
+          WHERE
+            custom_five_9_call_id IN (
+              SELECT DISTINCT call_id FROM five9.call_log WHERE campaign ILIKE '%credit%'
+            )
+          UNION
+          SELECT DISTINCT
+            id AS ticket_id
+          FROM zendesk.ticket
+          WHERE
+            via_source_to_address = 'creditcardsupport@wealthsimple.com'
+          UNION
+          SELECT DISTINCT
+            ticket_id
+          FROM zendesk.ticket_tag_history
+          WHERE
+            "tag" = 'credit_card_related'
+        ),
+        topic_to_group_mapping AS (
+          SELECT DISTINCT
+            topic,
+            subtopic,
+            cs_group_l_2
+          FROM google_sheets.topic_to_group_mapping
+        ),
+        base_data AS (
+          SELECT
+            d.*,
+            fg.group_name AS first_cs_group_forwarded,
+            fg.pillar AS first_forwarded_pillar,
+            fg.cs_group_name AS first_group_name,
+            fg.parent_team AS first_parent_team,
+            CASE
+              WHEN pg.cs_group_name = 'Premium Services' AND d.is_abandoned = 1 AND d.channel = 'phone'
+                THEN 'Level 1'
+              ELSE pg.cs_group_name
+            END AS cs_group_name,
+            pg.parent_team AS cs_parent_group,
+            t.custom_stop_automated_follow_ups_if_pending AS stop_automated_follow_ups_if_pending,
+            s.last_solved_date,
+            s.cs_agent,
+            s.cs_agent_timezone,
+            CASE
+              WHEN d.is_abandoned = 1
+                THEN COALESCE(s.parent_topic, 'Model Uncertain - Abandoned')
+              ELSE COALESCE(s.parent_topic, 'No Topic')
+            END AS parent_topic,
+            s.topic,
+            s.subtopic,
+            CASE
+              WHEN s.client_tier_at_reachout = 'non-client' AND y.tier_name IS NOT NULL
+                THEN y.tier_name
+              ELSE s.client_tier_at_reachout
+            END AS client_tier_at_reachout,
+            s.aum_at_reachout,
+            s.is_bpo,
+            s.first_forwarded_is_bpo,
+            s.has_jira,
+            COALESCE(s.status, 'closed') AS status,
+            (
+              d.interaction_id IN (SELECT ticket_id FROM l1l2_tickets) OR s.ticket_id IN (SELECT ticket_id FROM premium_l1_tickets)
+            ) AND s.ticket_tags NOT ILIKE '%decagon_escalation%' AS l1l2_ticket,
+            d.interaction_id IN (SELECT ticket_id FROM premium_l1_tickets) AS is_premium_l1l2_ticket,
+            d.cs_group NOT ILIKE '%Level 1%' AS is_ticket_triaged_l1l2,
+            d.interaction_id IN (SELECT ticket_id FROM level1_web_triage_tickets) AS is_l1l2_web_triage,
+            CASE WHEN d.cs_group ILIKE '%french%' OR d.cs_group LIKE '%FR%' THEN 'French' ELSE 'English' END AS cs_group_english_french,
+            d.cs_group ILIKE '%Credit Card%' OR d.interaction_id IN (SELECT ticket_id FROM credit_card_tickets) AS is_credit_card,
+            CASE WHEN s.aum_at_reachout > 1000000 THEN TRUE ELSE FALSE END AS aum_above_1m
+          FROM client_experience.dim_ticket_demand AS d
+          LEFT JOIN
+            client_experience_backroom.prep_zendesk_groups AS pg
+            ON d.cs_group = pg.group_name
+          LEFT JOIN
+            client_experience.dim_ticket_summary AS s
+            ON d.interaction_id = s.ticket_id
+          LEFT JOIN
+            zendesk.ticket AS t
+            ON d.interaction_id = t.id
+          LEFT JOIN
+            client_experience_backroom.prep_zendesk_groups AS fg
+            ON COALESCE(s.first_cs_group_forwarded, d.cs_group) = fg.group_name
+          LEFT JOIN
+            tiers.fct_identity_subscription_tier_daily_values AS y
+            ON s.requester_identity_canonical_id = y.identity_canonical_id
+            AND s.ticket_created_at::DATE = DATEADD('day', 1, y.summary_date)
+        )
+      SELECT
+        DATE_TRUNC('week', interaction_start_at) AS interaction_start_at,
+        CASE WHEN channel IN ('phone', 'chat') THEN channel ELSE 'web' END AS channel_clean,
+        COUNT(DISTINCT interaction_id) AS "ticket volume"
+      FROM base_data
+      WHERE
+        pillar = 'CS'
+        AND "interaction_start_at" BETWEEN DATEADD('week', -18, DATE_TRUNC('week', CURRENT_DATE)) AND DATE_TRUNC('week', CURRENT_DATE)
+      GROUP BY
+        1,
+        2
+      ORDER BY
+        "ticket volume" DESC
+      LIMIT 50000;
+      ```
+    columns:
+      - name: interaction_start_at
+        description: "The timestamp for the start of the interaction, truncated to the beginning of the week (Monday). This column serves as the primary time key for weekly trend analysis."
+        tests:
+          - not_null
+      - name: channel_clean
+        description: "The cleaned and simplified communication channel. Values are constrained to 'phone', 'chat', or 'web'."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['phone', 'chat', 'web']
+      - name: ticket_volume
+        description: "The total count of distinct support tickets (interactions) for the given week and channel. This is the core metric for measuring demand."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+
+  - name: weekly_ticket_demand_by_client_tier
+    description: |
+      ### Model: Weekly Ticket Demand by Client Tier
+
+      **Purpose:** This model provides a weekly breakdown of ticket volume based on the client's service tier at the time they reached out. It is critical for assessing the support needs of different client segments (e.g., core, premium) and tailoring services accordingly.
+
+      **Business Logic:**
+      - **Joins and Logic:** Uses the exact same underlying subquery and CTE structure as the `weekly_ticket_demand_by_channel` model to enrich ticket data.
+      - **Grouping:** Instead of grouping by channel, this model groups the ticket volume by `client_tier_at_reachout`.
+      - **Handling Nulls:** If a client tier is not available, it is categorized as 'unknown tier' to ensure all tickets are counted.
+      - **Filtering:** Like its counterpart, this model focuses on 'CS' pillar tickets within a rolling 18-week window.
+      - **Metric:** The primary metric is `ticket_volume`, which is a distinct count of interactions for each client tier per week.
+
+      **Source Query:**
+      ```sql
+      WITH
+        premium_l1_tickets AS (
+          SELECT DISTINCT
+            ticket_id
+          FROM client_experience.dim_phone_ticket_interactions
+          WHERE
+            interaction_seq = 1
+            AND cs_group ILIKE '%premium%'
+            AND is_bpo
+            AND interaction_start_at::DATE >= '2024-08-26'
+        ),
+        l1l2_tickets AS (
+          SELECT DISTINCT
+            h.ticket_id
+          FROM zendesk.ticket_field_history AS h
+          LEFT JOIN
+            zendesk.ticket AS t
+            ON h.ticket_id = t.id
+          WHERE
+            h.value IN ('26916275861147', '26916276688411') -- Level 1, FR Level 1
+            AND CONVERT_TIMEZONE('America/Toronto', t.created_at::TIMESTAMP)::DATE > '2024-07-17'
+        ),
+        level1_web_triage_macro AS (
+          SELECT DISTINCT
+            ticket_id
+          FROM zendesk.ticket_macro_reference
+          WHERE
+            macro_id IN (27136102684443, 27136087449115)
+        ),
+        level1_web_triage_tickets AS (
+          SELECT DISTINCT
+            ticket_id
+          FROM zendesk.ticket_comment
+          WHERE
+            public
+            AND (
+              plain_body ILIKE '%As discussed, I will be passing your request over to the appropriate team for a follow-up%'
+              OR plain_body ILIKE '%They will be in touch as soon as possible%'
+              OR plain_body ILIKE '%Merci de nous avoir appelés aujourd’hui ! Pour faire suite à notre conversation, je vous informe que%votre demande à l%'
+              OR plain_body ILIKE '%équipe approprié qui sera en contact dans les plus brefs délais%'
+            )
+            AND ticket_id IN (
+              SELECT ticket_id FROM level1_web_triage_macro
+            )
+        ),
+        credit_card_tickets AS (
+          SELECT DISTINCT
+            id AS ticket_id
+          FROM zendesk.ticket
+          WHERE
+            custom_five_9_call_id IN (
+              SELECT DISTINCT call_id FROM five9.call_log WHERE campaign ILIKE '%credit%'
+            )
+          UNION
+          SELECT DISTINCT
+            id AS ticket_id
+          FROM zendesk.ticket
+          WHERE
+            via_source_to_address = 'creditcardsupport@wealthsimple.com'
+          UNION
+          SELECT DISTINCT
+            ticket_id
+          FROM zendesk.ticket_tag_history
+          WHERE
+            "tag" = 'credit_card_related'
+        ),
+        topic_to_group_mapping AS (
+          SELECT DISTINCT
+            topic,
+            subtopic,
+            cs_group_l_2
+          FROM google_sheets.topic_to_group_mapping
+        ),
+        base_data AS (
+          SELECT
+            d.*,
+            fg.group_name AS first_cs_group_forwarded,
+            fg.pillar AS first_forwarded_pillar,
+            fg.cs_group_name AS first_group_name,
+            fg.parent_team AS first_parent_team,
+            CASE
+              WHEN pg.cs_group_name = 'Premium Services' AND d.is_abandoned = 1 AND d.channel = 'phone'
+                THEN 'Level 1'
+              ELSE pg.cs_group_name
+            END AS cs_group_name,
+            pg.parent_team AS cs_parent_group,
+            t.custom_stop_automated_follow_ups_if_pending AS stop_automated_follow_ups_if_pending,
+            s.last_solved_date,
+            s.cs_agent,
+            s.cs_agent_timezone,
+            CASE
+              WHEN d.is_abandoned = 1
+                THEN COALESCE(s.parent_topic, 'Model Uncertain - Abandoned')
+              ELSE COALESCE(s.parent_topic, 'No Topic')
+            END AS parent_topic,
+            s.topic,
+            s.subtopic,
+            CASE
+              WHEN s.client_tier_at_reachout = 'non-client' AND y.tier_name IS NOT NULL
+                THEN y.tier_name
+              ELSE s.client_tier_at_reachout
+            END AS client_tier_at_reachout,
+            s.aum_at_reachout,
+            s.is_bpo,
+            s.first_forwarded_is_bpo,
+            s.has_jira,
+            COALESCE(s.status, 'closed') AS status,
+            (
+              d.interaction_id IN (SELECT ticket_id FROM l1l2_tickets) OR s.ticket_id IN (SELECT ticket_id FROM premium_l1_tickets)
+            ) AND s.ticket_tags NOT ILIKE '%decagon_escalation%' AS l1l2_ticket,
+            d.interaction_id IN (SELECT ticket_id FROM premium_l1_tickets) AS is_premium_l1l2_ticket,
+            d.cs_group NOT ILIKE '%Level 1%' AS is_ticket_triaged_l1l2,
+            d.interaction_id IN (SELECT ticket_id FROM level1_web_triage_tickets) AS is_l1l2_web_triage,
+            CASE WHEN d.cs_group ILIKE '%french%' OR d.cs_group LIKE '%FR%' THEN 'French' ELSE 'English' END AS cs_group_english_french,
+            d.cs_group ILIKE '%Credit Card%' OR d.interaction_id IN (SELECT ticket_id FROM credit_card_tickets) AS is_credit_card,
+            CASE WHEN s.aum_at_reachout > 1000000 THEN TRUE ELSE FALSE END AS aum_above_1m
+          FROM client_experience.dim_ticket_demand AS d
+          LEFT JOIN
+            client_experience_backroom.prep_zendesk_groups AS pg
+            ON d.cs_group = pg.group_name
+          LEFT JOIN
+            client_experience.dim_ticket_summary AS s
+            ON d.interaction_id = s.ticket_id
+          LEFT JOIN
+            zendesk.ticket AS t
+            ON d.interaction_id = t.id
+          LEFT JOIN
+            client_experience_backroom.prep_zendesk_groups AS fg
+            ON COALESCE(s.first_cs_group_forwarded, d.cs_group) = fg.group_name
+          LEFT JOIN
+            tiers.fct_identity_subscription_tier_daily_values AS y
+            ON s.requester_identity_canonical_id = y.identity_canonical_id
+            AND s.ticket_created_at::DATE = DATEADD('day', 1, y.summary_date)
+        )
+      SELECT
+        DATE_TRUNC('week', interaction_start_at) AS interaction_start_at,
+        COALESCE(client_tier_at_reachout, 'unknown tier') AS client_tier_at_reachout,
+        COUNT(DISTINCT interaction_id) AS "ticket volume"
+      FROM base_data
+      WHERE
+        pillar = 'CS'
+        AND "interaction_start_at" BETWEEN DATEADD('week', -18, DATE_TRUNC('week', CURRENT_DATE)) AND DATE_TRUNC('week', CURRENT_DATE)
+      GROUP BY
+        1,
+        2
+      ORDER BY
+        "ticket volume" DESC
+      LIMIT 50000;
+      ```
+    columns:
+      - name: interaction_start_at
+        description: "The timestamp for the start of the interaction, truncated to the beginning of the week. This serves as the primary time key for weekly trend analysis."
+        tests:
+          - not_null
+      - name: client_tier_at_reachout
+        description: "The client's service tier at the moment of interaction (e.g., 'core', 'premium'). If unavailable, it defaults to 'unknown tier'."
+        tests:
+          - not_null
+      - name: ticket_volume
+        description: "The total count of distinct support tickets (interactions) for the given week and client tier. This is the core metric for measuring demand from different client segments."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+
+  - name: weekly_phone_frt_percentiles
+    description: |
+      ### Model: Weekly Phone First Response Time (FRT) Percentiles
+
+      **Purpose:** This model calculates key percentiles for First Response Time (FRT) specifically for the phone channel. FRT is a critical KPI for measuring the efficiency and responsiveness of the support team. Tracking percentiles (P50, P80, P95, P99) provides a much richer view of performance than a simple average, highlighting the experience of the majority of clients as well as outliers.
+
+      **Business Logic:**
+      - **Channel Filter:** The model exclusively analyzes tickets from the 'phone' channel.
+      - **Metric Calculation:** It calculates the 50th (median), 80th, 95th, and 99th percentiles of the `first_reply_time` in minutes.
+      - **Exclusions:** It explicitly excludes tickets that are identified as Level 1 callbacks (`is_l1_callback`) to avoid skewing the data for initial inbound response times.
+      - **Filtering:** The model focuses on tickets assigned to the 'CS' pillar within a rolling 18-week window.
+
+      **Source Query:**
+      ```sql
+      SELECT
+        DATE_TRUNC('week', ticket_created_at) AS ticket_created_at,
+        (1.0 / 60) * PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY first_reply_time ASC) AS frt_p50_mins,
+        (1.0 / 60) * PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY first_reply_time ASC) AS frt_p80_mins,
+        (1.0 / 60) * PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY first_reply_time ASC) AS frt_p95_mins,
+        (1.0 / 60) * PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY first_reply_time ASC) AS frt_p99_mins
+      FROM client_experience.dim_ticket_summary_slim
+      WHERE
+        channel IN ('phone')
+        AND first_forwarded_pillar = 'CS'
+        AND "ticket_created_at" BETWEEN DATEADD('week', -18, DATE_TRUNC('week', CURRENT_DATE)) AND DATE_TRUNC('week', CURRENT_DATE)
+        AND NOT is_l1_callback
+      GROUP BY
+        1
+      ORDER BY
+        frt_p50_mins DESC
+      LIMIT 1000;
+      ```
+    columns:
+      - name: ticket_created_at
+        description: "The ticket creation timestamp, truncated to the beginning of the week. This is the primary time key for the model."
+        tests:
+          - not_null
+      - name: frt_p50_mins
+        description: "The 50th percentile (median) of First Response Time in minutes for phone tickets created during the week. This represents the typical response time for a client."
+        tests:
+          - not_null
+      - name: frt_p80_mins
+        description: "The 80th percentile of First Response Time in minutes. 80% of clients received a response within this time."
+        tests:
+          - not_null
+      - name: frt_p95_mins
+        description: "The 95th percentile of First Response Time in minutes. 95% of clients received a response within this time. This helps identify systemic delays."
+        tests:
+          - not_null
+      - name: frt_p99_mins
+        description: "The 99th percentile of First Response Time in minutes. Used to monitor and understand extreme outlier response times."
+        tests:
+          - not_null
+
+  - name: weekly_phone_frt_percentiles_premium
+    description: |
+      ### Model: Weekly Phone FRT Percentiles for Premium+ Clients
+
+      **Purpose:** This model is a specialized version of the phone FRT model, focusing exclusively on Premium-tier clients. It is used to monitor and ensure that service level agreements (SLAs) for high-value clients are being met.
+
+      **Business Logic:**
+      - **Client Tier Filter:** The model filters for tickets where the `client_tier_at_reachout` is one of 'generation', 'trying premium', or 'premium'.
+      - **Channel & Exclusions:** Similar to the general FRT model, it focuses on the 'phone' channel, excludes L1 callbacks, and analyzes an 18-week rolling window.
+      - **Metric Calculation:** It calculates the 50th, 80th, 95th, and 99th percentiles of `first_reply_time` in minutes for this specific client segment.
+
+      **Source Query:**
+      ```sql
+      SELECT
+        DATE_TRUNC('week', ticket_created_at) AS ticket_created_at,
+        (1.0 / 60) * PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY first_reply_time ASC) AS frt_p50_mins,
+        (1.0 / 60) * PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY first_reply_time ASC) AS frt_p80_mins,
+        (1.0 / 60) * PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY first_reply_time ASC) AS frt_p95_mins,
+        (1.0 / 60) * PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY first_reply_time ASC) AS frt_p99_mins
+      FROM client_experience.dim_ticket_summary_slim
+      WHERE
+        channel IN ('phone')
+        AND first_forwarded_pillar = 'CS'
+        AND "ticket_created_at" BETWEEN DATEADD('week', -18, DATE_TRUNC('week', CURRENT_DATE)) AND DATE_TRUNC('week', CURRENT_DATE)
+        AND client_tier_at_reachout IN ('generation', 'trying premium', 'premium')
+        AND NOT is_l1_callback
+      GROUP BY
+        1
+      ORDER BY
+        frt_p50_mins DESC
+      LIMIT 1000;
+      ```
+    columns:
+      - name: ticket_created_at
+        description: "The ticket creation timestamp, truncated to the beginning of the week."
+        tests:
+          - not_null
+      - name: frt_p50_mins
+        description: "The 50th percentile (median) of First Response Time in minutes for Premium+ phone tickets."
+        tests:
+          - not_null
+      - name: frt_p80_mins
+        description: "The 80th percentile of First Response Time in minutes for Premium+ phone tickets."
+        tests:
+          - not_null
+      - name: frt_p95_mins
+        description: "The 95th percentile of First Response Time in minutes for Premium+ phone tickets."
+        tests:
+          - not_null
+      - name: frt_p99_mins
+        description: "The 99th percentile of First Response Time in minutes for Premium+ phone tickets."
+        tests:
+          - not_null
+
+  - name: top_100_longest_frt_tickets_last_10_days
+    description: |
+      ### Model: Top 100 Longest FRT Tickets (Last 10 Days)
+
+      **Purpose:** This model provides a tactical, operational view of individual tickets with the longest First Response Times. It is designed to help team leads and managers quickly identify and investigate significant delays in customer response.
+
+      **Business Logic:**
+      - **Time Frame:** The model specifically looks at tickets created within the last 10 days from the current date.
+      - **Ranking:** It orders tickets by `first_reply_time` in descending order and limits the output to the top 100, effectively creating a "worst-offenders" list for FRT.
+      - **Enrichment:** It includes a clickable HTML link directly to the Zendesk ticket, allowing for immediate drill-down and investigation. Key contextual data like the agent's BPO status, client tier, and ticket status are included.
+      - **Filtering:** It only includes phone tickets from the 'CS' pillar where a first reply has actually occurred.
+
+      **Source Query:**
+      ```sql
+      SELECT
+        '<a href="[https://wealthsimple.zendesk.com/agent/tickets/](https://wealthsimple.zendesk.com/agent/tickets/)' || ticket_id || '">' || ticket_id || '</a>' AS ticket_link,
+        ticket_created_at,
+        (1.0 / 60) * first_reply_time AS "frt (mins)",
+        first_cs_group_forwarded AS "first cs group",
+        first_forwarded_is_bpo AS "first agent is bpo",
+        client_tier_at_reachout,
+        status
+      FROM client_experience.dim_ticket_summary_slim
+      WHERE
+        channel IN ('phone')
+        AND ticket_created_at::DATE >= DATEADD('day', -10, CURRENT_DATE::DATE)
+        AND first_forwarded_pillar = 'CS'
+        AND first_reply_time IS NOT NULL
+        AND NOT is_l1_callback
+      ORDER BY
+        first_reply_time DESC
+      LIMIT 100;
+      ```
+    columns:
+      - name: ticket_link
+        description: "An HTML link that navigates directly to the ticket within the Zendesk agent interface."
+        tests:
+          - not_null
+          - unique
+      - name: ticket_created_at
+        description: "The exact timestamp when the ticket was created."
+        tests:
+          - not_null
+      - name: "frt (mins)"
+        description: "The First Response Time for the ticket, converted to minutes."
+        tests:
+          - not_null
+      - name: first_cs_group
+        description: "The name of the first customer support group the ticket was assigned to."
+      - name: first_agent_is_bpo
+        description: "A boolean flag indicating if the first assigned agent is part of a BPO (Business Process Outsourcing) partner."
+      - name: client_tier_at_reachout
+        description: "The client's service tier when they initiated the contact."
+      - name: status
+        description: "The current status of the ticket (e.g., 'open', 'solved', 'pending')."
+        tests:
+          - not_null
+
+  - name: weekly_all_channel_resolution_time_percentiles
+    description: |
+      ### Model: Weekly All-Channel Resolution Time (RT) Percentiles
+
+      **Purpose:** This model measures the end-to-end time it takes to solve a customer's issue, from creation to the final resolution. It calculates key percentiles for the `time_to_last_resolution` across all support channels. This metric is a key indicator of overall support efficiency and complexity.
+
+      **Business Logic:**
+      - **Metric:** The core metric is `time_to_last_resolution`, which captures the total duration until the ticket's final 'solved' status update. The results are presented in days for easier interpretation of longer-running tickets.
+      - **Aggregation:** Data is grouped weekly based on the `last_solved_date` of the ticket.
+      - **Percentiles:** It calculates the 50th, 80th, and 95th percentiles to provide a comprehensive view of resolution time performance.
+      - **Scope:** The model includes all tickets from the 'CS' pillar within a rolling 18-week period.
+
+      **Source Query:**
+      ```sql
+      SELECT
+        DATE_TRUNC('week', last_solved_date) AS last_solved_date,
+        (1.0 / (60 * 60 * 24)) * PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY time_to_last_resolution ASC) AS rt_p50_days,
+        (1.0 / (60 * 60 * 24)) * PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY time_to_last_resolution ASC) AS rt_p80_days,
+        (1.0 / (60 * 60 * 24)) * PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY time_to_last_resolution ASC) AS rt_p95_days
+      FROM client_experience.dim_ticket_summary_slim
+      WHERE
+        pillar = 'CS'
+        AND "last_solved_date" BETWEEN DATEADD('week', -18, DATE_TRUNC('week', CURRENT_DATE)) AND DATE_TRUNC('week', CURRENT_DATE)
+      GROUP BY
+        1
+      ORDER BY
+        rt_p50_days DESC
+      LIMIT 1000;
+      ```
+    columns:
+      - name: last_solved_date
+        description: "The ticket's final resolution date, truncated to the beginning of the week. This is the primary time key for this model."
+        tests:
+          - not_null
+      - name: rt_p50_days
+        description: "The 50th percentile (median) of Resolution Time in days. Represents the typical time to solve a ticket."
+        tests:
+          - not_null
+      - name: rt_p80_days
+        description: "The 80th percentile of Resolution Time in days. 80% of tickets were solved within this timeframe."
+        tests:
+          - not_null
+      - name: rt_p95_days
+        description: "The 95th percentile of Resolution Time in days. Used to analyze tickets that take significantly longer than average to resolve."
+        tests:
+          - not_null
+
+  - name: weekly_average_qa_score
+    description: |
+      ### Model: Weekly Average QA Score
+
+      **Purpose:** This model calculates the average weekly Quality Assurance (QA) score for the customer support pillar. It's a key performance indicator for measuring the quality and adherence to standards in customer interactions.
+
+      **Business Logic:**
+      - **Metric:** Calculates the `AVG` of the `avg_qa_score` field.
+      - **Source:** Pulls directly from the `dim_cs_agent_scorecard`, which is a pre-aggregated table containing daily agent performance metrics.
+      - **Filtering:** Filters for data from the 'CS' pillar within a rolling 18-week window.
+      - **Granularity:** Aggregates daily scores into a weekly average.
+
+      **Source Query:**
+      ```sql
+      SELECT
+        DATE_TRUNC('week', summary_date) AS summary_date,
+        AVG(1.0 * avg_qa_score) AS avg_qa_score
+      FROM client_experience.dim_cs_agent_scorecard
+      WHERE
+        pillar = 'CS'
+        AND "summary_date" BETWEEN DATEADD('week', -18, DATE_TRUNC('week', CURRENT_DATE)) AND DATE_TRUNC('week', CURRENT_DATE)
+      GROUP BY
+        1
+      ORDER BY
+        avg_qa_score DESC
+      LIMIT 10000;
+      ```
+    columns:
+      - name: summary_date
+        description: "The date of the performance record, truncated to the beginning of the week."
+        tests:
+          - not_null
+      - name: avg_qa_score
+        description: "The average Quality Assurance score for all interactions reviewed during that week."
+        tests:
+          - not_null
+
+  - name: weekly_solved_tickets_by_channel
+    description: |
+      ### Model: Weekly Solved Tickets by Channel
+
+      **Purpose:** This model provides a count of solved tickets per week, broken down by the channel of communication. It helps measure the productivity and output of the support team across different channels.
+
+      **Business Logic:**
+      - **Metric:** The metric `solves` is a distinct count of `ticket_id`.
+      - **Time Granularity:** Data is grouped by the `last_solved_date`, truncated to the week.
+      - **Dimension:** The data is broken down by `channel`.
+      - **Filtering:** Includes only tickets from the 'CS' pillar within a rolling 18-week window.
+
+      **Source Query:**
+      ```sql
+      SELECT
+        DATE_TRUNC('week', last_solved_date) AS last_solved_date,
+        channel,
+        COUNT(DISTINCT ticket_id) AS solves
+      FROM client_experience.dim_ticket_summary_slim
+      WHERE
+        pillar = 'CS'
+        AND "last_solved_date" BETWEEN DATEADD('week', -18, DATE_TRUNC('week', CURRENT_DATE)) AND DATE_TRUNC('week', CURRENT_DATE)
+      GROUP BY
+        1,
+        2
+      ORDER BY
+        solves DESC
+      LIMIT 10000;
+      ```
+    columns:
+      - name: last_solved_date
+        description: "The date the ticket was last marked as solved, truncated to the beginning of the week."
+        tests:
+          - not_null
+      - name: channel
+        description: "The communication channel through which the ticket was handled (e.g., 'phone', 'chat', 'email')."
+        tests:
+          - not_null
+      - name: solves
+        description: "The total count of distinct tickets solved in the given week for the specified channel."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+
+  - name: weekly_csat_percentage
+    description: |
+      ### Model: Weekly CSAT (4&5) Percentage
+
+      **Purpose:** This model calculates the weekly Customer Satisfaction (CSAT) score as a percentage. It measures the proportion of customers who rated their support experience positively.
+
+      **Business Logic:**
+      - **Metric Definition:** The `csat` column in the source table is a binary flag (1 for good, 0 for bad). This model calculates the `AVG` of this column, which directly yields the percentage of 'good' ratings (scores of 4 or 5).
+      - **Time Granularity:** Aggregated weekly based on the ticket's `last_solved_date`.
+      - **Filtering:** Includes only 'CS' pillar tickets from the last 18 weeks.
+
+      **Source Query:**
+      ```sql
+      SELECT
+        DATE_TRUNC('week', last_solved_date) AS last_solved_date,
+        AVG(1.0000 * csat) AS "csat (4&5) %"
+      FROM client_experience.dim_ticket_summary_slim
+      WHERE
+        pillar = 'CS'
+        AND "last_solved_date" BETWEEN DATEADD('week', -18, DATE_TRUNC('week', CURRENT_DATE)) AND DATE_TRUNC('week', CURRENT_DATE)
+      GROUP BY
+        1
+      ORDER BY
+        "csat (4&5) %" DESC
+      LIMIT 10000;
+      ```
+    columns:
+      - name: last_solved_date
+        description: "The date the ticket was last marked as solved, truncated to the beginning of the week."
+        tests:
+          - not_null
+      - name: "csat (4&5) %"
+        description: "The percentage of customers who gave a positive CSAT rating (a score of 4 or 5) for tickets solved in that week."
+        tests:
+          - not_null
+
+  - name: good_csat_tickets_detailed
+    description: |
+      ### Model: Detailed List of Good CSAT Tickets
+
+      **Purpose:** This model provides a detailed list of all tickets that received a positive CSAT rating. It is used for positive reinforcement, identifying best practices, and recognizing high-performing agents.
+
+      **Business Logic:**
+      - **Filtering:** Filters for tickets where `csat = '1'` (good rating) and a `csat_score_given` exists. It focuses on 'CS' pillar tickets solved within the last 18 weeks.
+      - **Enrichment:** Includes the agent's name, their group, the specific score, any comments left by the customer, and a direct link to the Zendesk ticket for review.
+      - **Ordering:** Results are ordered by the most recent solved date.
+
+      **Source Query:**
+      ```sql
+      SELECT
+        '<a href="[https://wealthsimple.zendesk.com/agent/tickets/](https://wealthsimple.zendesk.com/agent/tickets/)' || ticket_id || '">' || ticket_id || '</a>' AS ticket_link,
+        last_solved_date,
+        cs_agent,
+        cs_group_name,
+        csat,
+        csat_score_given,
+        csat_comment
+      FROM client_experience.dim_ticket_summary_slim
+      WHERE
+        csat = '1' -- Corresponds to a good rating
+        AND csat_score_given IS NOT NULL
+        AND pillar = 'CS'
+        AND "last_solved_date" BETWEEN DATEADD('week', -18, DATE_TRUNC('week', CURRENT_DATE)) AND DATE_TRUNC('week', CURRENT_DATE)
+      GROUP BY
+        1, 2, 3, 4, 5, 6, 7
+      ORDER BY
+        last_solved_date DESC NULLS LAST,
+        ticket_link ASC
+      LIMIT 50000;
+      ```
+    columns:
+      - name: ticket_link
+        description: "An HTML link that navigates directly to the ticket within the Zendesk agent interface."
+        tests:
+          - not_null
+          - unique
+      - name: last_solved_date
+        description: "The date the ticket was last marked as solved."
+        tests:
+          - not_null
+      - name: cs_agent
+        description: "The name of the agent who was assigned the ticket when it was solved."
+      - name: cs_group_name
+        description: "The name of the support group the ticket belonged to when solved."
+      - name: csat
+        description: "The binary CSAT flag, which will be '1' for all rows in this model."
+        tests:
+          - accepted_values:
+              values: ['1']
+      - name: csat_score_given
+        description: "The numerical score given by the customer (e.g., 4 or 5)."
+        tests:
+          - not_null
+      - name: csat_comment
+        description: "The verbatim comment left by the customer, providing qualitative feedback."
+
+  - name: bad_csat_tickets_detailed
+    description: |
+      ### Model: Detailed List of Bad CSAT Tickets
+
+      **Purpose:** This model lists all tickets that received a negative CSAT rating. It is a critical tool for quality control, identifying coaching opportunities for agents, and understanding the root causes of customer dissatisfaction.
+
+      **Business Logic:**
+      - **Filtering:** Filters for tickets where `csat = '0'` (bad rating) and a `csat_score_given` exists. It focuses on 'CS' pillar tickets solved within the last 18 weeks.
+      - **Enrichment:** Similar to the good CSATs model, it includes the agent's name, group, the score, customer comments, and a direct link to the Zendesk ticket for root cause analysis.
+      - **Ordering:** Results are ordered by the most recent solved date to prioritize follow-up on recent issues.
+
+      **Source Query:**
+      ```sql
+      SELECT
+        '<a href="[https://wealthsimple.zendesk.com/agent/tickets/](https://wealthsimple.zendesk.com/agent/tickets/)' || ticket_id || '">' || ticket_id || '</a>' AS ticket_link,
+        last_solved_date,
+        cs_agent,
+        cs_group_name,
+        csat,
+        csat_score_given,
+        csat_comment
+      FROM client_experience.dim_ticket_summary_slim
+      WHERE
+        csat = '0' -- Corresponds to a bad rating
+        AND csat_score_given IS NOT NULL
+        AND pillar = 'CS'
+        AND "last_solved_date" BETWEEN DATEADD('week', -18, DATE_TRUNC('week', CURRENT_DATE)) AND DATE_TRUNC('week', CURRENT_DATE)
+      GROUP BY
+        1, 2, 3, 4, 5, 6, 7
+      ORDER BY
+        last_solved_date DESC NULLS LAST,
+        ticket_link ASC
+      LIMIT 50000;
+      ```
+    columns:
+      - name: ticket_link
+        description: "An HTML link that navigates directly to the ticket within the Zendesk agent interface for review."
+        tests:
+          - not_null
+          - unique
+      - name: last_solved_date
+        description: "The date the ticket was last marked as solved."
+        tests:
+          - not_null
+      - name: cs_agent
+        description: "The name of the agent assigned to the ticket."
+      - name: cs_group_name
+        description: "The name of the support group the ticket belonged to."
+      - name: csat
+        description: "The binary CSAT flag, which will be '0' for all rows in this model."
+        tests:
+          - accepted_values:
+              values: ['0']
+      - name: csat_score_given
+        description: "The specific numerical score given by the customer (e.g., 1, 2, or 3)."
+        tests:
+          - not_null
+      - name: csat_comment
+        description: "The verbatim customer comment, providing crucial context for the negative rating."
+
+  - name: weekly_handle_time_percentiles
+    description: |
+      ### Model: Weekly Handle Time (HT) Percentiles
+
+      **Purpose:** This model analyzes the `handle_time` for tickets, which represents the total time an agent actively works on a ticket. It calculates weekly percentiles to understand agent efficiency and ticket complexity.
+
+      **Business Logic:**
+      - **Metric:** The core metric is `handle_time` from the source table, converted to minutes.
+      - **Percentiles:** It calculates the 50th, 80th, 95th, and 99th percentiles to show the distribution of handle times.
+      - **Time Granularity:** Data is aggregated weekly based on the `ticket_created_at` timestamp.
+      - **Filtering:** Includes only tickets from the 'CS' pillar within a rolling 18-week window.
+
+      **Source Query:**
+      ```sql
+      SELECT
+        DATE_TRUNC('week', ticket_created_at) AS ticket_created_at,
+        (1.0 / 60) * PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY handle_time ASC) AS "p50 ht (mins)",
+        (1.0 / 60) * PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY handle_time ASC) AS "p80 ht (mins)",
+        (1.0 / 60) * PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY handle_time ASC) AS "p95 ht (mins)",
+        (1.0 / 60) * PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY handle_time ASC) AS "p99 ht (mins)"
+      FROM client_experience.dim_ticket_summary_slim
+      WHERE
+        pillar = 'CS'
+        AND "ticket_created_at" BETWEEN DATEADD('week', -18, DATE_TRUNC('week', CURRENT_DATE)) AND DATE_TRUNC('week', CURRENT_DATE)
+      GROUP BY
+        1
+      ORDER BY
+        "p50 ht (mins)" DESC
+      LIMIT 1000;
+      ```
+    columns:
+      - name: ticket_created_at
+        description: "The ticket creation timestamp, truncated to the beginning of the week."
+        tests:
+          - not_null
+      - name: "p50 ht (mins)"
+        description: "The 50th percentile (median) of ticket handle time in minutes for the week."
+        tests:
+          - not_null
+      - name: "p80 ht (mins)"
+        description: "The 80th percentile of ticket handle time in minutes for the week."
+        tests:
+          - not_null
+      - name: "p95 ht (mins)"
+        description: "The 95th percentile of ticket handle time in minutes for the week."
+        tests:
+          - not_null
+      - name: "p99 ht (mins)"
+        description: "The 99th percentile of ticket handle time in minutes for the week."
+        tests:
+          - not_null
+
+  - name: weekly_spph_by_agent_level
+    description: |
+      ### Model: Weekly Solves Per Productive Hour (SPPH) by Agent Level
+
+      **Purpose:** This model calculates the Solves Per Productive Hour (SPPH), a key productivity metric, and segments it by agent service level ('Level 1' vs. 'Level 2'). This helps in comparing the efficiency of different support tiers.
+
+      **Business Logic:**
+      - **Metric (SPPH):** Calculated as `SUM(tickets_solved) / SUM(scheduled_productive_time_in_hours)`.
+      - **Segmentation:** A `CASE` statement on the `cs_group` name categorizes agents into 'Level 1' or 'Level 2'.
+      - **Filtering:** The model focuses on agents with the 'associate' position type within the 'CS' pillar. It uses a rolling 18-week window and excludes the current, potentially incomplete, date.
+      - **Source:** Uses the `dim_cs_agent_scorecard` as its base.
+
+      **Source Query:**
+      ```sql
+      SELECT
+        DATE_TRUNC('week', summary_date) AS summary_date,
+        CASE WHEN cs_group ILIKE '%Level 1%' THEN 'Level 1' ELSE 'Level 2' END AS cs_group,
+        SUM(1.0000 * tickets_solved) / NULLIF(SUM((1.0 / (60 * 60)) * scheduled_productive_time), 0) AS spph
+      FROM client_experience.dim_cs_agent_scorecard
+      WHERE
+        position_type IN ('associate')
+        AND pillar IN ('CS')
+        AND "summary_date" BETWEEN DATEADD('week', -18, DATE_TRUNC('week', CURRENT_DATE)) AND DATE_TRUNC('week', CURRENT_DATE)
+        AND summary_date < CURRENT_DATE
+      GROUP BY
+        1,
+        2
+      ORDER BY
+        spph DESC
+      LIMIT 50000;
+      ```
+    columns:
+      - name: summary_date
+        description: "The date of the performance record, truncated to the beginning of the week."
+        tests:
+          - not_null
+      - name: cs_group
+        description: "The service level of the agent group, categorized as 'Level 1' or 'Level 2'."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Level 1', 'Level 2']
+      - name: spph
+        description: "The calculated Solves Per Productive Hour for that agent level and week."
+        tests:
+          - not_null
+
+  - name: weekly_spph_by_team
+    description: |
+      ### Model: Weekly Solves Per Productive Hour (SPPH) by Team
+
+      **Purpose:** This model calculates the Solves Per Productive Hour (SPPH) productivity metric and aggregates it by specific support teams. This allows for performance comparison and efficiency analysis at the team level.
+
+      **Business Logic:**
+      - **Metric (SPPH):** Calculated as `SUM(tickets_solved) / SUM(scheduled_productive_time_in_hours)`.
+      - **Team Grouping:** A `CASE` statement is used to consolidate related teams (e.g., 'Deposits and withdrawals' and 'Internal transfers') into a single reporting group.
+      - **Filtering:** Similar to the agent-level model, this query focuses on 'associate' agents in the 'CS' pillar over the last 18 weeks, excluding the current day.
+      - **Source:** Built upon the `dim_cs_agent_scorecard`.
+
+      **Source Query:**
+      ```sql
+      SELECT
+        DATE_TRUNC('week', summary_date) AS summary_date,
+        CASE
+          WHEN cs_group_name IN ('Deposits and withdrawals', 'Internal transfers of funds or assets')
+            THEN 'Deposits, Withdrawals, and Internal Transfers'
+          ELSE cs_group_name
+        END AS cs_group_name,
+        SUM(1.0000 * tickets_solved) / NULLIF(SUM((1.0 / (60 * 60)) * scheduled_productive_time), 0) AS spph
+      FROM client_experience.dim_cs_agent_scorecard
+      WHERE
+        position_type IN ('associate')
+        AND pillar IN ('CS')
+        AND "summary_date" BETWEEN DATEADD('week', -18, DATE_TRUNC('week', CURRENT_DATE)) AND DATE_TRUNC('week', CURRENT_DATE)
+        AND summary_date < CURRENT_DATE
+      GROUP BY
+        1,
+        2
+      ORDER BY
+        spph DESC
+      LIMIT 50000;
+      ```
+    columns:
+      - name: summary_date
+        description: "The date of the performance record, truncated to the beginning of the week."
+        tests:
+          - not_null
+      - name: cs_group_name
+        description: "The name of the customer support team or consolidated group."
+        tests:
+          - not_null
+      - name: spph
+        description: "The calculated Solves Per Productive Hour for that team and week."
+        tests:
+          - not_null
