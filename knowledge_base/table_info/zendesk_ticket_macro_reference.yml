@@ -1,0 +1,196 @@
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# YAML Configuration for the 'ticket_macro_reference' dbt model.
+#
+# Table Description:
+# This table, 'zendesk.ticket_macro_reference', acts as a log that records every instance of a macro being applied to
+# a ticket. In Zendesk, macros are powerful, predefined sequences of actions that agents can execute with a single
+# click to streamline their workflows (e.g., send a standard reply, change ticket status, and assign it to a
+# specific group all at once). Each row in this table represents one such application event. It captures which macro
+# was used ('macro_id', 'macro_title'), which agent applied it ('user_id'), on which ticket it was applied
+# ('ticket_id'), and precisely when this occurred ('created'). This data is essential for analyzing agent efficiency,
+# understanding which macros are most effective, ensuring consistent application of business processes, and auditing
+# actions taken on a ticket.
+#
+# Author: Gemini AI
+# Version: 1.0
+# Created Date: 2025-06-20
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+version: 2
+
+models:
+  - name: ticket_macro_reference
+    description: "Logs every application of a macro on a ticket, providing a history of which automated actions were taken, by whom, and when."
+    config:
+      materialized: table
+      schema: zendesk
+      tags: ['zendesk', 'support', 'auditing', 'macros', 'agent_productivity']
+      # Redshift-specific configurations inferred from the DDL.
+      redshift:
+        diststyle: AUTO      # As specified in the DDL.
+        primary_key: "id"
+        # The DDL does not specify a sort key for this table.
+        foreign_keys:
+          - name: fk_macro_reference_to_ticket
+            column: "ticket_id"
+            references:
+              model: "ticket"
+              column: "id"
+          - name: fk_macro_reference_to_user
+            column: "user_id"
+            references:
+              model: "user"
+              column: "id"
+
+    columns:
+      #=======================================
+      #=== Primary Key & Foreign Keys ========
+      #=======================================
+      - name: id
+        description: "The unique identifier for this specific macro application event. This is the primary key for the table."
+        data_type: bigint
+        constraints:
+          - type: not_null
+          - type: primary_key
+        tests:
+          - unique
+          - not_null
+        meta:
+          encoding: "az64"
+          pii: false
+          notes: "AZ64 is a standard, efficient encoding for 64-bit integer primary keys."
+
+      - name: ticket_id
+        description: "The unique identifier of the ticket on which the macro was applied. This is a foreign key to the 'ticket' table."
+        data_type: bigint
+        constraints:
+          - type: foreign_key
+            expression: "REFERENCES zendesk.ticket(id)"
+        tests:
+          - relationships:
+              to: ref('ticket')
+              field: id
+        meta:
+          encoding: "az64"
+          pii: false
+          notes: "Links the macro usage event to the ticket's main record."
+
+      - name: user_id
+        description: "The unique identifier of the user (agent) who applied the macro. This is a foreign key to the 'user' table."
+        data_type: bigint
+        constraints:
+          - type: foreign_key
+            expression: 'REFERENCES zendesk."user"(id)'
+        tests:
+          - relationships:
+              to: ref('user')
+              field: id
+        meta:
+          encoding: "az64"
+          pii: false # The ID itself is not PII, but it links to a user.
+          notes: "Identifies the actor responsible for applying the automated actions."
+
+      #=======================================
+      #======== Macro Details ================
+      #=======================================
+      - name: macro_id
+        description: "The unique identifier of the macro that was applied. This ID is defined in the Zendesk macro configuration settings."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: false
+          notes: "This is the definitive ID for the macro and should be used to join to a 'macros' table if one exists."
+          example_values: ["360045678912", "360044556677"]
+
+      - name: macro_title
+        description: "The human-readable name or title of the macro that was applied at the time of its application."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: false
+          notes: "Useful for direct analysis without needing to join to a separate macros table. Note that if the macro title is changed later in Zendesk, this field will retain the historical title."
+          example_values: ["Reply and solve", "Escalate to Tier 2", "Password Reset Instructions"]
+
+      - name: macro_deleted
+        description: "A boolean flag indicating if the macro that was applied has since been deleted from the Zendesk system."
+        data_type: boolean
+        meta:
+          encoding: "raw"
+          pii: false
+          notes: "Helpful for understanding why a macro that appears in this log may no longer be available for use. RAW encoding is standard for booleans."
+          example_values: [false, true]
+
+      #=======================================
+      #== Channel & Source (Via) Details =====
+      #=======================================
+      - name: via_channel
+        description: "The channel through which the agent triggered the macro application (e.g., web interface, API call)."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: false
+          notes: "Provides context on how the macro was used."
+          example_values: ["web", "api"]
+
+      - name: via_source_from_id
+        description: "The ID of the source object that contained the macro application event. For example, the ID of the comment or update where the macro was applied."
+        data_type: bigint
+        meta:
+          encoding: "az64"
+          pii: false
+
+      - name: via_source_from_title
+        description: "The title of the source object."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: false
+
+      - name: via_source_from_address
+        description: "The 'from' address of the source event. For an agent applying a macro, this is often null or internal."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: true
+
+      - name: via_source_to_name
+        description: "The 'to' name of the source event."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: true
+
+      - name: via_source_to_address
+        description: "The 'to' address of the source event."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: true
+
+      - name: via_source_rel
+        description: "The relationship of the source, if applicable."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: false
+
+      #=======================================
+      #==== Timestamps & System Metadata =====
+      #=======================================
+      - name: created
+        description: "The exact timestamp (in UTC) when the macro was applied to the ticket."
+        data_type: timestamp with time zone
+        meta:
+          encoding: "az64"
+          pii: false
+          notes: "This is the primary timestamp for analyzing when automations are used."
+          example_values: ["2025-06-20 09:30:15+00:00"]
+
+      - name: _fivetran_synced
+        description: "The timestamp (in UTC) when this row was last successfully synchronized by the Fivetran data integration pipeline. This is a metadata column added by the ETL tool."
+        data_type: timestamp with time zone
+        meta:
+          encoding: "az64"
+          pii: false
+          notes: "Used to monitor the health and data freshness of the ETL pipeline."
+          example_values: ["2025-06-20 10:00:05.123+00:00"]

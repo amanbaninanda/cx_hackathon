@@ -1,0 +1,184 @@
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# YAML Configuration for the 'ticket_tag_history' dbt model.
+#
+# Table Description:
+# This table, 'zendesk.ticket_tag_history', functions as a meticulous audit log, capturing every change made to the
+# tags on a Zendesk ticket. Tags are keywords or short phrases used to categorize and add context to tickets, which
+# is fundamental for routing, reporting, and triggering automations. Each row in this table represents a single event:
+# either a tag being added to a ticket or a tag being removed. It records which ticket was affected ('ticket_id'),
+# which tag was involved ('tag'), whether it was added or removed ('tagged'), who performed the action ('user_id'),
+# and the exact time of the event ('updated'). This granular history is crucial for auditing ticket classifications,
+# debugging business rules and automations that rely on tags, and analyzing how ticket context evolves over its lifecycle.
+# The table utilizes a composite primary key to ensure each unique tagging event is recorded distinctly.
+#
+# Author: Gemini AI
+# Version: 1.0
+# Created Date: 2025-06-20
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+version: 2
+
+models:
+  - name: ticket_tag_history
+    description: "An audit table that logs the addition and removal of tags for each ticket over time."
+    config:
+      materialized: table
+      schema: zendesk
+      tags: ['zendesk', 'support', 'auditing', 'history', 'tags']
+      # Redshift-specific configurations inferred from the DDL.
+      redshift:
+        diststyle: AUTO      # As specified in the DDL.
+        sortkey: ["ticket_id"] # As specified in the DDL. Sorting by ticket_id will co-locate all events for a single ticket, improving query performance.
+        # dbt does not have a native concept of composite primary keys for testing, but we document it here.
+        # Tests for uniqueness should be implemented on a surrogate key or as a custom test combining the key columns.
+        primary_key_definition: "PRIMARY KEY (tag, ticket_id, updated)"
+        foreign_keys:
+          - name: fk_tag_history_to_ticket
+            column: "ticket_id"
+            references:
+              model: "ticket"
+              column: "id"
+          - name: fk_tag_history_to_user
+            column: "user_id"
+            references:
+              model: "user"
+              column: "id"
+
+    columns:
+      #=======================================
+      #==== Composite Primary Key Fields =====
+      #=======================================
+      - name: tag
+        description: "The specific tag that was either added to or removed from the ticket. This is a primary component of the composite primary key."
+        data_type: character varying(256)
+        constraints:
+          - type: not_null
+          - type: primary_key_component
+        tests:
+          - not_null
+        meta:
+          encoding: "raw" # RAW encoding is specified, suggesting this column is frequently used in WHERE clauses and has low cardinality relative to the table size.
+          pii: false
+          notes: "Tags are a core part of Zendesk workflow and analytics. Examples could be anything from 'billing_question' to 'urgent_follow_up'."
+          example_values: ["about_invest", "password_reset", "tier_2_escalation", "feedback"]
+
+      - name: ticket_id
+        description: "The unique identifier of the ticket whose tags were modified. This is a component of the composite primary key and a foreign key to the 'ticket' table."
+        data_type: bigint
+        constraints:
+          - type: not_null
+          - type: primary_key_component
+        tests:
+          - not_null
+          - relationships:
+              to: ref('ticket')
+              field: id
+        meta:
+          encoding: "az64"
+          pii: false
+          notes: "Links the tag change event back to a specific ticket."
+
+      - name: updated
+        description: "The exact timestamp (in UTC) when the tag was added or removed. This is the final component of the composite primary key."
+        data_type: timestamp with time zone
+        constraints:
+          - type: not_null
+          - type: primary_key_component
+        tests:
+          - not_null
+        meta:
+          encoding: "az64"
+          pii: false
+          notes: "This timestamp provides the chronological order of tagging events for a given ticket. The default value '1970-01-01' is a fallback for records where the timestamp was not captured."
+          default_value: "'1970-01-01 00:00:00+00'::timestamp with time zone"
+
+      #=======================================
+      #==== Change Event Details =============
+      #=======================================
+      - name: tagged
+        description: "A boolean flag that indicates the nature of the event. 'true' means the tag was added to the ticket at the 'updated' timestamp. 'false' means the tag was removed."
+        data_type: boolean
+        meta:
+          encoding: "raw"
+          pii: false
+          notes: "This is the core field for understanding the state change. To find the current tags on a ticket, one would look for the most recent event for each tag and filter for where 'tagged' is true."
+          example_values: [true, false]
+
+      - name: user_id
+        description: "The unique identifier of the user (agent) or system process that added or removed the tag. This can be null if the action was performed by a system automation. It is a foreign key to the 'user' table."
+        data_type: bigint
+        constraints:
+          - type: foreign_key
+            expression: 'REFERENCES zendesk."user"(id)'
+        tests:
+          - relationships:
+              to: ref('user')
+              field: id
+        meta:
+          encoding: "az64"
+          pii: false
+          notes: "Crucial for auditing who is categorizing tickets and how."
+          example_values: [99887766, null] # Can be an agent ID or null for system actions.
+
+      #=======================================
+      #== Channel & Source (Via) Details =====
+      #=======================================
+      - name: via_channel
+        description: "The channel through which the event that *caused* this tag change occurred (e.g., an agent using the web UI, an automation rule, a macro application)."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: false
+          notes: "Provides context on how the ticket was tagged."
+          example_values: ["web", "rule", "automation", "api", "macro"]
+
+      # ... The remaining via_* fields describe the specific source event (e.g., an email, a web update) that triggered the tag change.
+      # They provide a rich audit trail for the action.
+
+      - name: via_source_from_id
+        description: "The ID of the source object (e.g., comment ID, automation ID, macro ID) that initiated the tag change."
+        data_type: bigint
+        meta: { encoding: "az64", pii: false }
+
+      - name: via_source_from_title
+        description: "The title of the source object, such as the name of the automation or macro that ran."
+        data_type: character varying(256)
+        meta: { encoding: "lzo", pii: false, example_values: ["Automation: Tag urgent tickets", "Macro: Escalate to billing"] }
+
+      - name: via_source_from_address
+        description: "The 'from' address of the source event. Usually null unless the tag was added by an action on an incoming email."
+        data_type: character varying(256)
+        meta: { encoding: "lzo", pii: true }
+
+      - name: via_source_to_name
+        description: "The 'to' name associated with the source event."
+        data_type: character varying(256)
+        meta: { encoding: "lzo", pii: true }
+
+      - name: via_source_from_name
+        description: "The 'from' name associated with the source event."
+        data_type: character varying(256)
+        meta: { encoding: "lzo", pii: true }
+
+      - name: via_source_from_facebook_id
+        description: "If the triggering event was from Facebook, this is the user's Facebook ID."
+        data_type: bigint
+        meta: { encoding: "az64", pii: true }
+
+      - name: via_source_from_deleted
+        description: "A boolean flag indicating if the source object that triggered the change (e.g., the macro or automation) has since been deleted."
+        data_type: boolean
+        meta: { encoding: "raw", pii: false }
+
+      #=======================================
+      #==== Timestamps & System Metadata =====
+      #=======================================
+      - name: _fivetran_synced
+        description: "The timestamp (in UTC) when this row was last successfully synchronized by the Fivetran data integration pipeline. This is a metadata column added by the ETL tool."
+        data_type: timestamp with time zone
+        meta:
+          encoding: "az64"
+          pii: false
+          notes: "Used to monitor the health and data freshness of the ETL pipeline."
+          example_values: ["2025-06-20 10:00:20.987+00:00"]
+

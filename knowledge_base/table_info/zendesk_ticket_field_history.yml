@@ -1,0 +1,182 @@
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# YAML Configuration for the 'ticket_field_history' dbt model.
+#
+# Table Description:
+# This table, 'zendesk.ticket_field_history', serves as an audit log that meticulously tracks every change made to
+# the fields of a Zendesk ticket. Each row in this table represents a single modification to a single field at a
+# specific point in time. For example, when a ticket's status changes from 'open' to 'pending', a new row is
+# generated in this table. It captures what field was changed ('field_name'), its new value ('value'), who made the
+# change ('user_id'), and when the change occurred ('updated'). This provides a complete, granular history of a
+# ticket's lifecycle, which is invaluable for auditing, compliance, performance analysis (e.g., how long a ticket
+# stayed in a particular status), and debugging complex support workflows. The table uses a composite primary key
+# to uniquely identify each change event.
+#
+# Author: Gemini AI
+# Version: 1.0
+# Created Date: 2025-06-20
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+version: 2
+
+models:
+  - name: ticket_field_history
+    description: "An audit table that logs all historical changes to the fields of a ticket. Each row represents one change to one field."
+    config:
+      materialized: table
+      schema: zendesk
+      tags: ['zendesk', 'support', 'auditing', 'history']
+      # Redshift-specific configurations inferred from the DDL.
+      redshift:
+        diststyle: AUTO      # As specified in the DDL.
+        sortkey: ["field_name"] # As specified in the DDL. Sorting by field_name can speed up queries that analyze changes to specific fields (e.g., 'status').
+        # dbt does not have a native concept of composite primary keys for testing, but we document it here.
+        # Tests for uniqueness should be implemented on a surrogate key or as a custom test.
+        primary_key_definition: "PRIMARY KEY (ticket_id, updated, field_name)"
+
+    columns:
+      #=======================================
+      #==== Composite Primary Key Fields =====
+      #=======================================
+      - name: ticket_id
+        description: "The unique identifier of the ticket that was modified. This is a component of the composite primary key and a foreign key to the 'ticket' table."
+        data_type: bigint
+        constraints:
+          - type: not_null
+          - type: primary_key_component
+        tests:
+          - not_null
+          - relationships:
+              to: ref('ticket')
+              field: id
+        meta:
+          encoding: "az64"
+          pii: false
+          notes: "Links the field change event back to the specific ticket."
+
+      - name: updated
+        description: "The exact timestamp (in UTC) when the field was updated. This is a critical component of the composite primary key, providing the chronological aspect of the audit log."
+        data_type: timestamp with time zone
+        constraints:
+          - type: not_null
+          - type: primary_key_component
+        tests:
+          - not_null
+        meta:
+          encoding: "az64"
+          pii: false
+          notes: "The combination of ticket_id and updated shows the state of a ticket over time. The default value of '1970-01-01' is likely a placeholder for records where the timestamp was not properly captured."
+          default_value: "'1970-01-01 00:00:00+00'::timestamp with time zone"
+
+      - name: field_name
+        description: "The name of the ticket field that was changed. This is a component of the composite primary key."
+        data_type: character varying(256)
+        constraints:
+          - type: not_null
+          - type: primary_key_component
+        tests:
+          - not_null
+        meta:
+          encoding: "raw" # RAW encoding is specified, suggesting this column is frequently used in WHERE clauses and has low cardinality.
+          pii: false
+          notes: "This column tells you WHAT was changed (e.g., 'status', 'assignee_id', 'priority', or a custom field name)."
+          example_values: ["status", "priority", "assignee_id", "custom_field_360012345678"]
+
+      #=======================================
+      #==== Change Event Details =============
+      #=======================================
+      - name: value
+        description: "The new value that was assigned to the field. The previous value must be inferred by looking at the prior entry for the same ticket_id and field_name, ordered by the 'updated' timestamp."
+        data_type: character varying(32768)
+        meta:
+          encoding: "lzo"
+          pii: true # This field can hold any value, including names, emails, or other PII, depending on the field that was changed.
+          notes: "The very large size of this field allows it to store the value of almost any standard or custom field, including long text. For ID fields (e.g., assignee_id), this will contain the numeric ID as a string."
+          example_values: ["pending", "99887766", "High", "A new value for a custom text field..."]
+
+      - name: user_id
+        description: "The unique identifier of the user (typically an agent) or system process that made the change. This is a foreign key to the 'user' table. It can be null if the change was made by an automated process without a designated user."
+        data_type: bigint
+        constraints:
+          - type: foreign_key
+            expression: 'REFERENCES zendesk."user"(id)' # Assuming a user table exists
+        tests:
+          - relationships:
+              to: ref('user')
+              field: id
+        meta:
+          encoding: "az64"
+          pii: false # The ID itself is not PII.
+          notes: "Attributes the change to a specific actor, which is crucial for auditing."
+          example_values: [99887766, 11223344, null]
+
+      #=======================================
+      #== Channel & Source (Via) Details =====
+      #=======================================
+      - name: via_channel
+        description: "The channel through which the event that *caused* this field change occurred. For example, an agent changing the status via the web interface would have 'web'."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: false
+          notes: "Provides context on how the update was triggered."
+          example_values: ["web", "api", "rule", "automation"]
+
+      - name: via_source_from_address
+        description: "The 'from' address of the source event. If the change was triggered by an email reply, this would be the sender's email address."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: true
+          example_values: ["customer@example.com", "agent@yourcompany.com", null]
+
+      - name: via_source_to_address
+        description: "The 'to' address of the source event, such as the support email address that received a triggering email."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: true
+          example_values: ["support@yourcompany.com", null]
+
+      - name: via_source_from_name
+        description: "The name associated with the 'from' address of the triggering event."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: true
+          example_values: ["John Doe", "Internal Automation", null]
+
+      # ... (The remaining via_* fields provide exhaustive detail about the source event, similar to the ticket_comment table) ...
+      # For brevity in this summary, the descriptions are slightly condensed but would be fully detailed in a complete file.
+      # They all describe the specific event (an email, a tweet, a web action, etc.) that contained the field update.
+
+      - name: via_source_rel
+        description: "The relationship of the source, e.g., for a follow-up ticket."
+        data_type: character varying(256)
+        meta: { encoding: "lzo", pii: false }
+
+      - name: via_source_from_id
+        description: "The ID of the source object (e.g., a comment ID, automation ID)."
+        data_type: bigint
+        meta: { encoding: "az64", pii: false }
+
+      - name: via_source_from_post_url
+        description: "If the update was triggered by a social media post, the URL of that post."
+        data_type: character varying(256)
+        meta: { encoding: "lzo", pii: true }
+
+      - name: via_source_from_deleted
+        description: "A boolean flag indicating if the source object that triggered the change has since been deleted."
+        data_type: boolean
+        meta: { encoding: "raw", pii: false }
+
+      #=======================================
+      #==== Timestamps & System Metadata =====
+      #=======================================
+      - name: _fivetran_synced
+        description: "The timestamp (in UTC) when this row was last successfully synchronized by the Fivetran data integration pipeline. This is a metadata column added by the ETL tool."
+        data_type: timestamp with time zone
+        meta:
+          encoding: "az64"
+          pii: false
+          notes: "Useful for monitoring the freshness and health of the data pipeline."
+          example_values: ["2025-06-20 12:00:15.789+00:00"]

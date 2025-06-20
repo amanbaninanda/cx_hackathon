@@ -1,0 +1,374 @@
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# YAML Configuration for the 'ticket_comment' dbt model.
+#
+# Table Description:
+# This table, 'zendesk.ticket_comment', contains the individual comments and events that make up the conversation
+# history of a Zendesk ticket. Each row represents a single entry in a ticket's timeline, such as a customer's reply,
+# an agent's public response, a private internal note, or system-generated events like a call recording. This table is
+# fundamentally relational, linking back to the 'ticket' table via 'ticket_id' and to the 'user' table via 'user_id'
+# to identify the author of the comment. It provides the granular, chronological detail necessary for analyzing
+# conversation flows, agent-customer interactions, response times, and the specific content of support requests.
+# The table is optimized for a Redshift data warehouse, utilizing specific encoding strategies for performance and
+# storage efficiency.
+#
+# Author: Gemini AI
+# Version: 1.0
+# Created Date: 2025-06-20
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+version: 2
+
+models:
+  - name: ticket_comment
+    description: "Stores all comments, replies, and events associated with Zendesk tickets. Each row is one piece of a ticket's conversation thread."
+    config:
+      materialized: table
+      schema: zendesk
+      tags: ['zendesk', 'support', 'customer_service', 'conversations']
+      # Redshift-specific configurations inferred from the DDL.
+      redshift:
+        diststyle: AUTO      # As specified in the DDL.
+        sortkey: ["id"]      # As specified in the DDL.
+        primary_key: "id"
+        foreign_keys:
+          - name: fk_ticket_comment_to_ticket
+            column: "ticket_id"
+            references:
+              model: "ticket"
+              column: "id"
+          - name: fk_ticket_comment_to_user
+            column: "user_id"
+            references:
+              model: "user"
+              column: "id"
+
+    columns:
+      #=======================================
+      #=== Primary Key & Foreign Keys ========
+      #=======================================
+      - name: id
+        description: "The unique identifier for the ticket comment. This is the primary key for this table."
+        data_type: bigint
+        constraints:
+          - type: not_null
+          - type: primary_key
+        tests:
+          - unique
+          - not_null
+        meta:
+          encoding: "az64"
+          pii: false
+          notes: "AZ64 encoding is highly efficient for sorted numeric primary keys."
+
+      - name: ticket_id
+        description: "The unique identifier of the parent ticket to which this comment belongs. This is the foreign key that links this comment back to the main 'ticket' table."
+        data_type: bigint
+        constraints:
+          - type: not_null # A comment must belong to a ticket
+          - type: foreign_key
+            expression: "REFERENCES zendesk.ticket(id)"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('ticket')
+              field: id
+        meta:
+          encoding: "az64"
+          pii: false
+          notes: "Essential for joining comments to their respective tickets."
+
+      - name: user_id
+        description: "The unique identifier of the user who created the comment. This could be an end-user (customer) or an agent. This is a foreign key to the 'user' table."
+        data_type: bigint
+        constraints:
+          - type: not_null # A comment must have an author
+          - type: foreign_key
+            expression: 'REFERENCES zendesk."user"(id)'
+        tests:
+          - not_null
+          - relationships:
+              to: ref('user')
+              field: id
+        meta:
+          encoding: "az64"
+          pii: false # The ID itself is not PII, but it links to a user who is.
+          notes: "Crucial for distinguishing between customer replies and agent responses."
+
+      #=======================================
+      #========= Comment Content =============
+      #=======================================
+      - name: body
+        description: "The raw content of the comment. This field may contain plain text or the source markup (e.g., Markdown) before it is rendered. For email, this is often the raw body."
+        data_type: character varying(65535)
+        meta:
+          encoding: "lzo"
+          pii: true
+          notes: "LZO is a good choice for large, compressible text fields. This field contains the core communication content and is highly likely to contain PII."
+          example_values: ["Thanks for your help!", "I'm still having the same issue. Can you please look into this further?", "Internal note: escalating to Tier 2."]
+
+      - name: html_body
+        description: "The content of the comment, formatted in HTML. This is typically used for displaying comments in a web interface and is the standard for email-based comments."
+        data_type: character varying(65535)
+        meta:
+          encoding: "lzo"
+          pii: true
+          notes: "This version of the body is useful for analysis that requires parsing structured content."
+          example_values: ["<p>Thanks for your help!</p>", "<div>I'm still having the same issue...</div>"]
+
+      - name: plain_body
+        description: "The content of the comment with all HTML or other markup stripped out, leaving only plain text. Ideal for text analysis and natural language processing (NLP)."
+        data_type: character varying(65535)
+        meta:
+          encoding: "lzo"
+          pii: true
+          notes: "This is the cleanest version of the comment text for analytical purposes."
+          example_values: ["Thanks for your help!", "I'm still having the same issue..."]
+
+      #=======================================
+      #==== Visibility & Channel Flags =======
+      #=======================================
+      - name: public
+        description: "A boolean flag indicating whether the comment is public (visible to the ticket requester) or private (an internal note visible only to agents)."
+        data_type: boolean
+        meta:
+          encoding: "raw"
+          pii: false
+          notes: "This is a critical field for distinguishing between customer-facing communication and internal team collaboration. RAW encoding is used for booleans as compression offers no benefit."
+          example_values: [true, false]
+
+      - name: trusted
+        description: "A boolean flag indicating if the comment is from a trusted source. Typically false for comments created by end-users."
+        data_type: boolean
+        meta:
+          encoding: "raw"
+          pii: false
+          example_values: [true, false]
+
+      - name: facebook_comment
+        description: "A boolean flag that is true if the comment originated from a Facebook post or message."
+        data_type: boolean
+        meta:
+          encoding: "raw"
+          pii: false
+          example_values: [true, false]
+
+      - name: tweet
+        description: "A boolean flag that is true if the comment originated from Twitter (X)."
+        data_type: boolean
+        meta:
+          encoding: "raw"
+          pii: false
+          example_values: [true, false]
+
+      - name: voice_comment
+        description: "A boolean flag that is true if the comment represents a voice call recording."
+        data_type: boolean
+        meta:
+          encoding: "raw"
+          pii: false
+          notes: "If this is true, the other 'voice_*' and 'call_*' fields will be populated."
+          example_values: [true, false]
+
+      #=======================================
+      #==== Voice Call & Transcription =====
+      #=======================================
+      - name: recording_url
+        description: "If this is a voice comment, this field contains the URL to the audio recording of the call."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: true
+          notes: "Accessing this URL requires appropriate authentication. The URL itself can be considered sensitive."
+          example_values: ["https://yourcompany.zendesk.com/api/v2/voice/recordings/12345.mp3", null]
+
+      - name: transcription_text
+        description: "The machine-generated text transcription of the voice call recording."
+        data_type: character varying(4096)
+        meta:
+          encoding: "lzo"
+          pii: true
+          notes: "The accuracy of the transcription may vary. It is a rich source of conversational data."
+          example_values: ["Hello thank you for calling support my name is Jane how can I help you...", null]
+
+      - name: transcription_status
+        description: "The status of the voice call transcription process."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: false
+          example_values: ["completed", "in_progress", "failed", null]
+
+      - name: voice_comment_transcription_visible
+        description: "A boolean flag indicating whether the transcription is visible in the Zendesk agent interface."
+        data_type: boolean
+        meta:
+          encoding: "raw"
+          pii: false
+          example_values: [true, false]
+
+      - name: call_duration
+        description: "The duration of the voice call in seconds."
+        data_type: bigint
+        meta:
+          encoding: "az64"
+          pii: false
+          notes: "Key metric for analyzing call center performance."
+          example_values: [180, 542, null]
+
+      - name: call_id
+        description: "The unique identifier for the voice call, likely from the telephony provider."
+        data_type: bigint
+        meta:
+          encoding: "az64"
+          pii: false
+          example_values: [9876543210, null]
+
+      - name: from
+        description: "For voice or SMS comments, the phone number of the originator (the customer)."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: true
+          notes: "This is sensitive PII."
+          example_values: ["+14165551234", null]
+
+      - name: to
+        description: "For voice or SMS comments, the phone number that was called (the support line)."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: true # While often a public number, it is still a phone number.
+          example_values: ["+18005551000", null]
+
+      - name: location
+        description: "For voice comments, the geographic location associated with the telephony provider or call."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: true
+          example_values: ["Toronto, ON, CA", "New York, NY, US", null]
+
+      #=======================================
+      #== Channel & Source (Via) Details =====
+      #=======================================
+      - name: via_channel
+        description: "The channel through which the comment was submitted (e.g., email, web form, API, chat)."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: false
+          notes: "This specifies the medium of this specific comment, which can differ from the ticket's original creation channel."
+          example_values: ["email", "web", "chat", "voice"]
+
+      - name: via_source_from_address
+        description: "The 'from' address of the source. For an email, this is the sender's email address."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: true
+          example_values: ["customer@example.com", "agent@yourcompany.com"]
+
+      - name: via_source_to_address
+        description: "The 'to' address of the source. For an email, this is the recipient's email address."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: true
+          example_values: ["support@yourcompany.com", "customer@example.com"]
+
+      - name: via_source_from_name
+        description: "The name associated with the 'from' address."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: true
+          example_values: ["John Doe", "Jane Smith (Support Agent)"]
+
+      - name: via_source_to_name
+        description: "The name associated with the 'to' address."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: true
+          example_values: ["YourCompany Support", "John Doe"]
+
+      - name: via_source_from_subject
+        description: "For email-based comments, the subject line of the email."
+        data_type: character varying(512)
+        meta:
+          encoding: "lzo"
+          pii: false # Subjects can contain PII but are often generic.
+          example_values: ["Re: [Request #12345] Cannot log in", "Update on your ticket"]
+
+      - name: via_source_to_email_ccs
+        description: "A list of addresses that were on the CC line of an incoming email comment."
+        data_type: character varying(16384)
+        meta:
+          encoding: "lzo"
+          pii: true
+          notes: "The large size allows for many CC'd addresses. This data is often stored as a serialized string (e.g., JSON array)."
+          example_values: ['["manager@example.com", "colleague@example.com"]']
+
+      - name: via_source_from_original_recipients
+        description: "The original list of recipients from the email headers."
+        data_type: character varying(16384)
+        meta:
+          encoding: "lzo"
+          pii: true
+          notes: "Similar to the CC field, this can contain multiple email addresses."
+          example_values: ['["support@yourcompany.com", "sales@yourcompany.com"]']
+
+      - name: via_source_from_facebook_id
+        description: "The Facebook user ID of the comment author, if from Facebook."
+        data_type: bigint
+        meta:
+          encoding: "az64"
+          pii: true
+          notes: "A unique identifier within the Facebook platform."
+
+      - name: via_source_from_profile_url
+        description: "The URL to the social media profile of the comment author."
+        data_type: character varying(256)
+        meta:
+          encoding: "lzo"
+          pii: true
+          notes: "e.g., a link to a user's Facebook or Twitter profile."
+
+      #=======================================
+      #==== Timestamps & System Metadata =====
+      #=======================================
+      - name: created
+        description: "The exact timestamp (in UTC) when the comment was created."
+        data_type: timestamp with time zone
+        meta:
+          encoding: "az64"
+          pii: false
+          notes: "The primary timestamp for ordering comments chronologically."
+          example_values: ["2025-06-20 10:45:00+00:00"]
+
+      - name: started_at
+        description: "For voice comments, the exact timestamp (in UTC) when the call started."
+        data_type: timestamp with time zone
+        meta:
+          encoding: "az64"
+          pii: false
+          example_values: ["2025-06-20 11:10:05+00:00", null]
+
+      - name: _fivetran_synced
+        description: "The timestamp (in UTC) when this row was last successfully synchronized by the Fivetran data integration pipeline. This is a metadata column added by the ETL tool."
+        data_type: timestamp with time zone
+        meta:
+          encoding: "az64"
+          pii: false
+          notes: "Useful for monitoring the freshness and health of the data pipeline."
+          example_values: ["2025-06-20 12:00:10.456+00:00"]
+
+      - name: metadata
+        description: "A field containing system-level metadata about the comment, often in JSON format. For example, it might contain information about the client used to send the message."
+        data_type: character varying(1024)
+        meta:
+          encoding: "lzo"
+          pii: false
+          notes: "The contents can be highly variable and system-dependent."
+          example_values: ['{"client": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)..."}']
+
