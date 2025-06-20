@@ -1,13 +1,3 @@
-
-* A detailed, multi-line description of its purpose and business logic.
-* The complete, cleaned SQL query embedded in a markdown code block, which your knowledge base can parse.
-* A comprehensive definition for each column, including descriptions and recommended tests.
-
-This approach provides a single, rich document that serves both as `dbt` project configuration and as a detailed reference for your knowledge base.
-
-***
-
-```yaml
 version: 2
 
 models:
@@ -23,6 +13,8 @@ models:
       - **Filtering:** The model focuses exclusively on tickets belonging to the 'CS' (Customer Support) pillar. It analyzes a rolling 18-week window from the current date to focus on recent trends.
       - **Metric:** The primary metric is `ticket_volume`, which represents a distinct count of `interaction_id` for each channel per week. This ensures that each unique interaction is counted only once.
       - **Data Source:** This model relies on a complex set of CTEs that join data from ticket demand, Zendesk, and internal mapping tables to correctly attribute interactions and classify tickets.
+
+      **Main Source Table:** `client_experience.dim_ticket_demand`
 
       **Source Query:**
       ```sql
@@ -173,21 +165,21 @@ models:
         2
       ORDER BY
         "ticket volume" DESC
-      LIMIT 50000;
+      ;
       ```
     columns:
       - name: interaction_start_at
-        description: "The timestamp for the start of the interaction, truncated to the beginning of the week (Monday). This column serves as the primary time key for weekly trend analysis."
+        description: "The timestamp for the start of the interaction, truncated to the beginning of the week (Monday). This column is sourced from `client_experience.dim_ticket_demand` and serves as the primary time key for weekly trend analysis."
         tests:
           - not_null
       - name: channel_clean
-        description: "The cleaned and simplified communication channel. Values are constrained to 'phone', 'chat', or 'web'."
+        description: "The cleaned and simplified communication channel, derived from the `channel` column in `client_experience.dim_ticket_demand`. Values are constrained to 'phone', 'chat', or 'web'."
         tests:
           - not_null
           - accepted_values:
               values: ['phone', 'chat', 'web']
       - name: ticket_volume
-        description: "The total count of distinct support tickets (interactions) for the given week and channel. This is the core metric for measuring demand."
+        description: "The total count of distinct support tickets (`interaction_id` from `client_experience.dim_ticket_demand`) for the given week and channel. This is the core metric for measuring demand."
         tests:
           - not_null
           - dbt_utils.expression_is_true:
@@ -205,6 +197,8 @@ models:
       - **Handling Nulls:** If a client tier is not available, it is categorized as 'unknown tier' to ensure all tickets are counted.
       - **Filtering:** Like its counterpart, this model focuses on 'CS' pillar tickets within a rolling 18-week window.
       - **Metric:** The primary metric is `ticket_volume`, which is a distinct count of interactions for each client tier per week.
+
+      **Main Source Table:** `client_experience.dim_ticket_demand`
 
       **Source Query:**
       ```sql
@@ -355,19 +349,19 @@ models:
         2
       ORDER BY
         "ticket volume" DESC
-      LIMIT 50000;
+     ;
       ```
     columns:
       - name: interaction_start_at
-        description: "The timestamp for the start of the interaction, truncated to the beginning of the week. This serves as the primary time key for weekly trend analysis."
+        description: "The timestamp for the start of the interaction from `client_experience.dim_ticket_demand`, truncated to the beginning of the week. This serves as the primary time key for weekly trend analysis."
         tests:
           - not_null
       - name: client_tier_at_reachout
-        description: "The client's service tier at the moment of interaction (e.g., 'core', 'premium'). If unavailable, it defaults to 'unknown tier'."
+        description: "The client's service tier at the moment of interaction (e.g., 'core', 'premium'), sourced from `client_experience.dim_ticket_summary`. If unavailable, it defaults to 'unknown tier'."
         tests:
           - not_null
       - name: ticket_volume
-        description: "The total count of distinct support tickets (interactions) for the given week and client tier. This is the core metric for measuring demand from different client segments."
+        description: "The total count of distinct support tickets (`interaction_id` from `client_experience.dim_ticket_demand`) for the given week and client tier. This is the core metric for measuring demand from different client segments."
         tests:
           - not_null
           - dbt_utils.expression_is_true:
@@ -384,6 +378,8 @@ models:
       - **Metric Calculation:** It calculates the 50th (median), 80th, 95th, and 99th percentiles of the `first_reply_time` in minutes.
       - **Exclusions:** It explicitly excludes tickets that are identified as Level 1 callbacks (`is_l1_callback`) to avoid skewing the data for initial inbound response times.
       - **Filtering:** The model focuses on tickets assigned to the 'CS' pillar within a rolling 18-week window.
+
+      **Main Source Table:** `client_experience.dim_ticket_summary_slim`
 
       **Source Query:**
       ```sql
@@ -403,11 +399,11 @@ models:
         1
       ORDER BY
         frt_p50_mins DESC
-      LIMIT 1000;
+      ;
       ```
     columns:
       - name: ticket_created_at
-        description: "The ticket creation timestamp, truncated to the beginning of the week. This is the primary time key for the model."
+        description: "The ticket creation timestamp from `client_experience.dim_ticket_summary_slim`, truncated to the beginning of the week. This is the primary time key for the model."
         tests:
           - not_null
       - name: frt_p50_mins
@@ -438,6 +434,8 @@ models:
       - **Channel & Exclusions:** Similar to the general FRT model, it focuses on the 'phone' channel, excludes L1 callbacks, and analyzes an 18-week rolling window.
       - **Metric Calculation:** It calculates the 50th, 80th, 95th, and 99th percentiles of `first_reply_time` in minutes for this specific client segment.
 
+      **Main Source Table:** `client_experience.dim_ticket_summary_slim`
+
       **Source Query:**
       ```sql
       SELECT
@@ -457,11 +455,11 @@ models:
         1
       ORDER BY
         frt_p50_mins DESC
-      LIMIT 1000;
+     ;
       ```
     columns:
       - name: ticket_created_at
-        description: "The ticket creation timestamp, truncated to the beginning of the week."
+        description: "The ticket creation timestamp from `client_experience.dim_ticket_summary_slim`, truncated to the beginning of the week."
         tests:
           - not_null
       - name: frt_p50_mins
@@ -493,6 +491,8 @@ models:
       - **Enrichment:** It includes a clickable HTML link directly to the Zendesk ticket, allowing for immediate drill-down and investigation. Key contextual data like the agent's BPO status, client tier, and ticket status are included.
       - **Filtering:** It only includes phone tickets from the 'CS' pillar where a first reply has actually occurred.
 
+      **Main Source Table:** `client_experience.dim_ticket_summary_slim`
+
       **Source Query:**
       ```sql
       SELECT
@@ -512,30 +512,30 @@ models:
         AND NOT is_l1_callback
       ORDER BY
         first_reply_time DESC
-      LIMIT 100;
+      ;
       ```
     columns:
       - name: ticket_link
-        description: "An HTML link that navigates directly to the ticket within the Zendesk agent interface."
+        description: "An HTML link, constructed using the `ticket_id` from `client_experience.dim_ticket_summary_slim`, that navigates directly to the ticket within the Zendesk agent interface."
         tests:
           - not_null
           - unique
       - name: ticket_created_at
-        description: "The exact timestamp when the ticket was created."
+        description: "The exact timestamp when the ticket was created, sourced from `client_experience.dim_ticket_summary_slim`."
         tests:
           - not_null
       - name: "frt (mins)"
-        description: "The First Response Time for the ticket, converted to minutes."
+        description: "The First Response Time for the ticket, converted to minutes. Sourced from the `first_reply_time` column."
         tests:
           - not_null
       - name: first_cs_group
-        description: "The name of the first customer support group the ticket was assigned to."
+        description: "The name of the first customer support group the ticket was assigned to. Sourced from the `first_cs_group_forwarded` column."
       - name: first_agent_is_bpo
-        description: "A boolean flag indicating if the first assigned agent is part of a BPO (Business Process Outsourcing) partner."
+        description: "A boolean flag indicating if the first assigned agent is part of a BPO (Business Process Outsourcing) partner. Sourced from the `first_forwarded_is_bpo` column."
       - name: client_tier_at_reachout
-        description: "The client's service tier when they initiated the contact."
+        description: "The client's service tier when they initiated the contact. Sourced from `client_experience.dim_ticket_summary_slim`."
       - name: status
-        description: "The current status of the ticket (e.g., 'open', 'solved', 'pending')."
+        description: "The current status of the ticket (e.g., 'open', 'solved', 'pending'). Sourced from `client_experience.dim_ticket_summary_slim`."
         tests:
           - not_null
 
@@ -550,6 +550,8 @@ models:
       - **Aggregation:** Data is grouped weekly based on the `last_solved_date` of the ticket.
       - **Percentiles:** It calculates the 50th, 80th, and 95th percentiles to provide a comprehensive view of resolution time performance.
       - **Scope:** The model includes all tickets from the 'CS' pillar within a rolling 18-week period.
+
+      **Main Source Table:** `client_experience.dim_ticket_summary_slim`
 
       **Source Query:**
       ```sql
@@ -566,11 +568,11 @@ models:
         1
       ORDER BY
         rt_p50_days DESC
-      LIMIT 1000;
+      ;
       ```
     columns:
       - name: last_solved_date
-        description: "The ticket's final resolution date, truncated to the beginning of the week. This is the primary time key for this model."
+        description: "The ticket's final resolution date from `client_experience.dim_ticket_summary_slim`, truncated to the beginning of the week. This is the primary time key for this model."
         tests:
           - not_null
       - name: rt_p50_days
@@ -598,6 +600,8 @@ models:
       - **Filtering:** Filters for data from the 'CS' pillar within a rolling 18-week window.
       - **Granularity:** Aggregates daily scores into a weekly average.
 
+      **Main Source Table:** `client_experience.dim_cs_agent_scorecard`
+
       **Source Query:**
       ```sql
       SELECT
@@ -611,15 +615,15 @@ models:
         1
       ORDER BY
         avg_qa_score DESC
-      LIMIT 10000;
+      ;
       ```
     columns:
       - name: summary_date
-        description: "The date of the performance record, truncated to the beginning of the week."
+        description: "The date of the performance record from `client_experience.dim_cs_agent_scorecard`, truncated to the beginning of the week."
         tests:
           - not_null
       - name: avg_qa_score
-        description: "The average Quality Assurance score for all interactions reviewed during that week."
+        description: "The average Quality Assurance score for all interactions reviewed during that week, calculated from the `avg_qa_score` column."
         tests:
           - not_null
 
@@ -634,6 +638,8 @@ models:
       - **Time Granularity:** Data is grouped by the `last_solved_date`, truncated to the week.
       - **Dimension:** The data is broken down by `channel`.
       - **Filtering:** Includes only tickets from the 'CS' pillar within a rolling 18-week window.
+
+      **Main Source Table:** `client_experience.dim_ticket_summary_slim`
 
       **Source Query:**
       ```sql
@@ -650,19 +656,19 @@ models:
         2
       ORDER BY
         solves DESC
-      LIMIT 10000;
+      ;
       ```
     columns:
       - name: last_solved_date
-        description: "The date the ticket was last marked as solved, truncated to the beginning of the week."
+        description: "The date the ticket was last marked as solved from `client_experience.dim_ticket_summary_slim`, truncated to the beginning of the week."
         tests:
           - not_null
       - name: channel
-        description: "The communication channel through which the ticket was handled (e.g., 'phone', 'chat', 'email')."
+        description: "The communication channel through which the ticket was handled (e.g., 'phone', 'chat', 'email'), sourced from `client_experience.dim_ticket_summary_slim`."
         tests:
           - not_null
       - name: solves
-        description: "The total count of distinct tickets solved in the given week for the specified channel."
+        description: "The total count of distinct tickets solved in the given week for the specified channel, based on `ticket_id`."
         tests:
           - not_null
           - dbt_utils.expression_is_true:
@@ -679,6 +685,8 @@ models:
       - **Time Granularity:** Aggregated weekly based on the ticket's `last_solved_date`.
       - **Filtering:** Includes only 'CS' pillar tickets from the last 18 weeks.
 
+      **Main Source Table:** `client_experience.dim_ticket_summary_slim`
+
       **Source Query:**
       ```sql
       SELECT
@@ -692,15 +700,15 @@ models:
         1
       ORDER BY
         "csat (4&5) %" DESC
-      LIMIT 10000;
+    ;
       ```
     columns:
       - name: last_solved_date
-        description: "The date the ticket was last marked as solved, truncated to the beginning of the week."
+        description: "The date the ticket was last marked as solved from `client_experience.dim_ticket_summary_slim`, truncated to the beginning of the week."
         tests:
           - not_null
       - name: "csat (4&5) %"
-        description: "The percentage of customers who gave a positive CSAT rating (a score of 4 or 5) for tickets solved in that week."
+        description: "The percentage of customers who gave a positive CSAT rating (a score of 4 or 5) for tickets solved in that week. Calculated from the `csat` flag."
         tests:
           - not_null
 
@@ -714,6 +722,8 @@ models:
       - **Filtering:** Filters for tickets where `csat = '1'` (good rating) and a `csat_score_given` exists. It focuses on 'CS' pillar tickets solved within the last 18 weeks.
       - **Enrichment:** Includes the agent's name, their group, the specific score, any comments left by the customer, and a direct link to the Zendesk ticket for review.
       - **Ordering:** Results are ordered by the most recent solved date.
+
+      **Main Source Table:** `client_experience.dim_ticket_summary_slim`
 
       **Source Query:**
       ```sql
@@ -736,11 +746,11 @@ models:
       ORDER BY
         last_solved_date DESC NULLS LAST,
         ticket_link ASC
-      LIMIT 50000;
+     ;
       ```
     columns:
       - name: ticket_link
-        description: "An HTML link that navigates directly to the ticket within the Zendesk agent interface."
+        description: "An HTML link, constructed from `ticket_id`, that navigates directly to the ticket within the Zendesk agent interface."
         tests:
           - not_null
           - unique
@@ -775,6 +785,8 @@ models:
       - **Enrichment:** Similar to the good CSATs model, it includes the agent's name, group, the score, customer comments, and a direct link to the Zendesk ticket for root cause analysis.
       - **Ordering:** Results are ordered by the most recent solved date to prioritize follow-up on recent issues.
 
+      **Main Source Table:** `client_experience.dim_ticket_summary_slim`
+
       **Source Query:**
       ```sql
       SELECT
@@ -796,11 +808,11 @@ models:
       ORDER BY
         last_solved_date DESC NULLS LAST,
         ticket_link ASC
-      LIMIT 50000;
+      ;
       ```
     columns:
       - name: ticket_link
-        description: "An HTML link that navigates directly to the ticket within the Zendesk agent interface for review."
+        description: "An HTML link, constructed from `ticket_id`, that navigates directly to the ticket within the Zendesk agent interface for review."
         tests:
           - not_null
           - unique
@@ -836,6 +848,8 @@ models:
       - **Time Granularity:** Data is aggregated weekly based on the `ticket_created_at` timestamp.
       - **Filtering:** Includes only tickets from the 'CS' pillar within a rolling 18-week window.
 
+      **Main Source Table:** `client_experience.dim_ticket_summary_slim`
+
       **Source Query:**
       ```sql
       SELECT
@@ -852,11 +866,11 @@ models:
         1
       ORDER BY
         "p50 ht (mins)" DESC
-      LIMIT 1000;
+     ;
       ```
     columns:
       - name: ticket_created_at
-        description: "The ticket creation timestamp, truncated to the beginning of the week."
+        description: "The ticket creation timestamp from `client_experience.dim_ticket_summary_slim`, truncated to the beginning of the week."
         tests:
           - not_null
       - name: "p50 ht (mins)"
@@ -888,6 +902,8 @@ models:
       - **Filtering:** The model focuses on agents with the 'associate' position type within the 'CS' pillar. It uses a rolling 18-week window and excludes the current, potentially incomplete, date.
       - **Source:** Uses the `dim_cs_agent_scorecard` as its base.
 
+      **Main Source Table:** `client_experience.dim_cs_agent_scorecard`
+
       **Source Query:**
       ```sql
       SELECT
@@ -905,21 +921,21 @@ models:
         2
       ORDER BY
         spph DESC
-      LIMIT 50000;
+     ;
       ```
     columns:
       - name: summary_date
-        description: "The date of the performance record, truncated to the beginning of the week."
+        description: "The date of the performance record from `client_experience.dim_cs_agent_scorecard`, truncated to the beginning of the week."
         tests:
           - not_null
       - name: cs_group
-        description: "The service level of the agent group, categorized as 'Level 1' or 'Level 2'."
+        description: "The service level of the agent group, categorized as 'Level 1' or 'Level 2' based on the `cs_group` column."
         tests:
           - not_null
           - accepted_values:
               values: ['Level 1', 'Level 2']
       - name: spph
-        description: "The calculated Solves Per Productive Hour for that agent level and week."
+        description: "The calculated Solves Per Productive Hour for that agent level and week. It is derived from `tickets_solved` and `scheduled_productive_time`."
         tests:
           - not_null
 
@@ -934,6 +950,8 @@ models:
       - **Team Grouping:** A `CASE` statement is used to consolidate related teams (e.g., 'Deposits and withdrawals' and 'Internal transfers') into a single reporting group.
       - **Filtering:** Similar to the agent-level model, this query focuses on 'associate' agents in the 'CS' pillar over the last 18 weeks, excluding the current day.
       - **Source:** Built upon the `dim_cs_agent_scorecard`.
+
+      **Main Source Table:** `client_experience.dim_cs_agent_scorecard`
 
       **Source Query:**
       ```sql
@@ -956,19 +974,18 @@ models:
         2
       ORDER BY
         spph DESC
-      LIMIT 50000;
+      ;
       ```
     columns:
       - name: summary_date
-        description: "The date of the performance record, truncated to the beginning of the week."
+        description: "The date of the performance record from `client_experience.dim_cs_agent_scorecard`, truncated to the beginning of the week."
         tests:
           - not_null
       - name: cs_group_name
-        description: "The name of the customer support team or consolidated group."
+        description: "The name of the customer support team or consolidated group, derived from the `cs_group_name` column."
         tests:
           - not_null
       - name: spph
-        description: "The calculated Solves Per Productive Hour for that team and week."
+        description: "The calculated Solves Per Productive Hour for that team and week. It is derived from `tickets_solved` and `scheduled_productive_time`."
         tests:
           - not_null
-```
