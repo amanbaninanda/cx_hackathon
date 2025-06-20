@@ -1,14 +1,14 @@
 # ------------------------------------------------------------------------------------
 # Knowledge Base: Customer Experience (CX) SQL Metrics from BPO dashboard
-# Version: 1.0
+# Version: 1.1
 # Description: This document provides a detailed breakdown of SQL queries used for
 #              analyzing customer experience and support operations data. It is
 #              intended to be used as a knowledge source for an AI, detailing
-#              the logic, context, and structure of key performance indicator (KPI)
-#              calculations.
+#              the logic, context, structure, and main source tables for key
+#              performance indicator (KPI) calculations.
 # ------------------------------------------------------------------------------------
 sql_knowledge_base:
-  
+
   # ==================================================================================
   # DATABASE SCHEMA OVERVIEW (Inferred)
   # This section provides a high-level overview of the tables used in the queries.
@@ -21,7 +21,8 @@ sql_knowledge_base:
         It aggregates and summarizes key information about each ticket, such as creation
         time, status, channel, agent assignment, resolution times, and customer
         satisfaction scores. The '_slim' version is likely a more performant,
-        pared-down version for faster queries on core metrics.
+        pared-down version for faster queries on core metrics. It is derived from
+        raw source tables like `zendesk.ticket`.
       key_columns_inferred:
         - ticket_id
         - ticket_created_at
@@ -53,7 +54,13 @@ sql_knowledge_base:
         A dimensional model likely built to track individual agent-client interactions
         (contacts) across different levels of support (L1, L2). It ranks interactions
         to identify the first, second, etc., response at each level, which is crucial
-        for tiered support metrics.
+        for tiered support metrics. Derived from `zendesk.ticket_comment` and other raw tables.
+
+    - table_name: "client_experience.dim_cs_agent_scorecard"
+      purpose: |
+        A highly aggregated daily scorecard table for each agent. It combines data from
+        multiple sources (Zendesk, Five9, Playvox) to calculate agent-level metrics
+        like QA scores, adherence, and chat acceptance rates. This is a key reporting table.
 
     - table_name: "client_experience_backroom.prep_*"
       purpose: |
@@ -73,6 +80,7 @@ sql_knowledge_base:
       to simplify the final aggregation.
     ctes:
       - name: "csat_survey"
+        main_source_table: "zendesk.ticket_alert"
         purpose: |
           To identify the exact timestamp when a "Customer Satisfaction" (CSAT) survey
           was first sent for a given ticket. This is done by filtering for Zendesk
@@ -87,6 +95,9 @@ sql_knowledge_base:
           )
 
       - name: "l1l2_tickets"
+        main_source_tables:
+          - "zendesk.ticket_field_history"
+          - "zendesk.ticket"
         purpose: |
           To identify all tickets that are part of the "Level 1 / Level 2" (L1/L2)
           tiered support service model. This model involves an initial handling by a
@@ -108,6 +119,7 @@ sql_knowledge_base:
           )
 
       - name: "l2_response_time"
+        main_source_table: "client_experience.dim_cx_contacts"
         purpose: |
           For tickets that have been handled by both L1 and L2 support, this CTE
           isolates the *first interaction* by an L2 agent. It captures details about
@@ -137,6 +149,7 @@ sql_knowledge_base:
           )
 
       - name: "ticket_mapping_082024 / ticket_mapping_groups"
+        main_source_table: "client_experience.dim_ticket_summary"
         purpose: |
           These CTEs work together to retroactively map old support group structures
           to the new Tier 2 model introduced around August 2024. This is done by
@@ -168,10 +181,14 @@ sql_knowledge_base:
               and coalesce(lower(dim_ticket_summary.subtopic),'None') = coalesce(trim(lower(map.subtopic)),'None')
             left join preset_uploads.chatbotivrmappedtoernie
               on dim_ticket_summary.topic = trim(chatbotivrmappedtoernie.topic)
-              and coalesce(dim_ticket_summary.subtopic,'None') = coalesce(trim(chatbotivrmappedtoernie.subtopic),'None')    
+              and coalesce(dim_ticket_summary.subtopic,'None') = coalesce(trim(chatbotivrmappedtoernie.subtopic),'None')   
           )
 
       - name: "credit_card_tickets"
+        main_source_tables:
+          - "zendesk.ticket"
+          - "five9.call_log"
+          - "zendesk.ticket_tag_history"
         purpose: |
           To create a definitive list of all tickets related to the Credit Card
           product. It combines tickets from multiple sources: those originating from
@@ -201,6 +218,7 @@ sql_knowledge_base:
   # ==================================================================================
   metric_calculations:
     - metric_name: "First Response Time (FRT)"
+      main_source_table: "client_experience.dim_ticket_summary_slim"
       objective: |
         To measure the speed of the initial response to a customer's inquiry. This is a
         critical indicator of service level and customer experience. The query calculates
@@ -208,12 +226,12 @@ sql_knowledge_base:
         are used instead of averages to better understand the experience of the majority
         of customers, ignoring extreme outliers that can skew an average.
       calculation_logic: |
-        The query operates on a virtual table derived from the main ticket summary.
+        The query operates on the `client_experience.dim_ticket_summary_slim` table.
         1. **`SELECT` clause**: It truncates the `ticket_created_at` to the day. The core calculation
            uses `percentile_cont(percentile) within group (order by first_reply_time asc)`
            to find the P95 and P80 values for the `first_reply_time` column. The result is
            divided by 60 to convert seconds to minutes.
-        2. **`FROM` clause**: It selects from a large subquery (prefaced with `/* with ... */`).
+        2. **`FROM` clause**: It queries from the `dim_ticket_summary_slim` table.
         3. **`WHERE` clause**: It filters the data to include only 'phone' channel tickets that
            meet specific L1/L2 criteria (e.g., handled by BPO, not a callback).
         4. **`GROUP BY` clause**: It groups the results by the creation day to see daily trends.
@@ -230,15 +248,17 @@ sql_knowledge_base:
           WHERE channel IN ('phone') AND ((is_l1l2_ticket) AND (first_forwarded_is_bpo) AND (not is_l1_callback) AND (1=1)) 
           GROUP BY DATE_TRUNC('day', ticket_created_at) 
           ORDER BY max(ticket_created_at) DESC 
-          LIMIT 10;
+          ;
 
     - metric_name: "Call Volume and Tickets Solved"
+      main_source_table: "client_experience.dim_ticket_summary_slim"
       objective: |
         To measure the daily operational volume and efficiency of the Level 1 support
         team. It tracks the total number of incoming calls, how many of those calls
         resulted in a solved ticket by the Level 1 team, and the resulting "Solve %"
         (also known as First Contact Resolution Rate for this cohort).
       calculation_logic: |
+        This query aggregates data from the `client_experience.dim_ticket_summary_slim` table.
         1. **`SELECT` clause**:
            - `count(distinct ticket_id)`: Total unique calls for the day.
            - `COUNT(DISTINCT CASE WHEN ... THEN ticket_id END)`: Counts unique tickets
@@ -253,12 +273,12 @@ sql_knowledge_base:
           query_hash: "6dcd92a04feb50f14bbcf07c661680ba"
         sql_code: |
           SELECT DATE_TRUNC('day', ticket_created_at) AS ticket_created_at, count(distinct ticket_id) AS "call volume", COUNT (DISTINCT 
-                 CASE WHEN cs_group_name='Level 1'
-                 and status in ('closed','solved') THEN ticket_id ELSE NULL END
-                 ) AS "tickets solved", CAST(COUNT (DISTINCT 
-                 CASE WHEN cs_group_name='Level 1'
-                 and status in ('solved','closed') THEN ticket_id ELSE NULL END
-                 ) AS float)/CAST(count(distinct ticket_id) AS float) AS "solve %" 
+              CASE WHEN cs_group_name='Level 1'
+              and status in ('closed','solved') THEN ticket_id ELSE NULL END
+              ) AS "tickets solved", CAST(COUNT (DISTINCT 
+              CASE WHEN cs_group_name='Level 1'
+              and status in ('solved','closed') THEN ticket_id ELSE NULL END
+              ) AS float)/CAST(count(distinct ticket_id) AS float) AS "solve %" 
           FROM (
             -- The large shared CTE block is conceptually placed here
             SELECT * FROM client_experience.dim_ticket_summary_slim ...
@@ -266,14 +286,16 @@ sql_knowledge_base:
           WHERE channel IN ('phone') AND pillar IN ('CS') AND ((is_l1l2_ticket) AND (1=1)) 
           GROUP BY DATE_TRUNC('day', ticket_created_at) 
           ORDER BY max(ticket_created_at) DESC 
-          LIMIT 10;
+         ;
 
     - metric_name: "CSAT (Customer Satisfaction)"
+      main_source_table: "client_experience.dim_ticket_summary_slim"
       objective: |
         To measure overall customer satisfaction with the support provided. This query
         calculates the daily CSAT score and also breaks down the volume of "good" vs.
         "bad" survey responses.
       calculation_logic: |
+        This query calculates daily CSAT scores from `client_experience.dim_ticket_summary_slim`.
         1. **`SELECT` clause**:
            - `avg(1.0000 * csat)`: Calculates the average satisfaction score. The `csat`
              column is likely binary (1 for good, 0 for bad), so this gives the
@@ -286,33 +308,30 @@ sql_knowledge_base:
       example_query:
         source_metadata:
           query_hash: "6dcd92a04feb50f14bbcf07c661680ba"
-    
           chart_id: 61975
           dashboard_id: 4255
         sql_code: |
           SELECT DATE_TRUNC('day', last_solved_date) AS last_solved_date, avg(1.0000 * csat) AS "csat 4&5", SUM(CASE WHEN csat = 1 and csat_score_given IS NOT NULL THEN 1 ELSE 0 END) AS "good csat", SUM(CASE WHEN csat = 0 and csat_score_given IS NOT NULL THEN 1 ELSE 0 END) AS "bad csat" 
           FROM (
-            -- The large shared CTE block is conceptually placed here
-            SELECT * FROM client_experience.dim_ticket_summary_slim ...
+            SELECT * FROM client_experience.dim_ticket_summary_slim 
           ) AS virtual_table 
           WHERE ((cs_group ILIKE '%Level 1'
           or cs_group ILIKE '%Wealthsimple Tax [Level2]') AND (last_solved_date is not null) AND (1=1)) 
           GROUP BY DATE_TRUNC('day', last_solved_date) 
           ORDER BY max(last_solved_date) DESC 
-          LIMIT 10;
+          ;
 
     - metric_name: "QA Data (Quality Assurance Score)"
+      main_source_table: "client_experience.dim_cs_agent_scorecard"
       objective: |
         To monitor the quality of support provided by agents, as measured by an internal
         Quality Assurance (QA) process. This query calculates the average daily QA
         score for a specific cohort of agents.
       calculation_logic: |
-        The query relies on a pre-aggregated table, `client_experience.dim_cs_agent_scorecard`.
+        The query relies on the pre-aggregated table, `client_experience.dim_cs_agent_scorecard`.
         1. **`SELECT` clause**: It simply calculates `avg(1.0 * avg_qa_score)`.
-        2. **`FROM` clause**: The source table `dim_cs_agent_scorecard` is itself built from
-           a very complex query (visible in the commented-out section) that joins scheduling
-           data (Playvox), agent activity data (Five9, Zendesk), and ticket data to create a
-           comprehensive daily scorecard for each agent.
+        2. **`FROM` clause**: The source is the `dim_cs_agent_scorecard` table which joins scheduling data
+           (Playvox), agent activity data (Five9, Zendesk), and ticket data.
         3. **`WHERE` clause**: Filters for dates before the current day and for specific agent
            groups ('Level 1', 'Wealthsimple Tax', 'Credit Card').
         4. **`GROUP BY` clause**: Aggregates the scores by day.
@@ -331,16 +350,17 @@ sql_knowledge_base:
           or cs_group ILIKE '%Wealthsimple Tax [Level2]' or cs_group ilike 'Credit Card') AND (1=1)) 
           GROUP BY DATE_TRUNC('day', summary_date) 
           ORDER BY max(summary_date) DESC 
-          LIMIT 10;
-          
+         ;
+            
     - metric_name: "Chat Agent Acceptance Rate %"
+      main_source_table: "client_experience.dim_cs_agent_scorecard"
       objective: |
         To measure an agent's willingness or ability to accept incoming chat requests
         that are directly assigned to them. A low rate could indicate agents are busy,
         avoiding work, or having technical issues. This is a key agent productivity and
         availability metric.
       calculation_logic: |
-        This query also uses the complex `dim_cs_agent_scorecard` table.
+        This query also uses the complex `client_experience.dim_cs_agent_scorecard` table.
         1. **`SELECT` clause**: The core logic is `sum(assigned_and_accepted_pings_chat) / nullif(sum(assigned_pings_chat),0)`.
            It divides the count of chats that were both assigned and accepted by the total
            number of assigned chats. `nullif` prevents division-by-zero errors. It also
@@ -351,7 +371,6 @@ sql_knowledge_base:
       example_query:
         source_metadata:
           query_hash: "6dcd92a04feb50f14bbcf07c661680ba"
-       
           chart_id: 63151
           dashboard_id: 4255
         sql_code: |
@@ -371,16 +390,17 @@ sql_knowledge_base:
           else 'Level 2'
           end 
           ORDER BY "chat acceptance rate %" DESC 
-          LIMIT 1000;
+         ;
 
     - metric_name: "Chat Concurrency Acceptance Rate %"
+      main_source_table: "client_experience.dim_cs_chat_interactions"
       objective: |
         To measure an agent's rate of accepting an *additional* chat when they are already
         handling at least one other chat. This is a measure of an agent's capacity and
         efficiency in a multi-chat environment. A high rate is desirable as it indicates
         agents are effectively handling multiple conversations simultaneously.
       calculation_logic: |
-        This query uses the `dim_cs_chat_interactions` table, which is focused on chat sessions.
+        This query uses the `client_experience.dim_cs_chat_interactions` table, which is focused on chat sessions.
         1. **`SELECT` clause**: The rate is calculated as
            `sum(concurrent_chat) / nullif((sum(in_another_chat) + sum(concurrent_chat)), 0)`.
            - `concurrent_chat`: A flag indicating a new chat was accepted while others were active.
@@ -412,4 +432,4 @@ sql_knowledge_base:
           else 'Level 2'
           end 
           ORDER BY concurrent_chat_acceptance DESC 
-          LIMIT 1000;
+        ;
