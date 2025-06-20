@@ -1,6 +1,4 @@
-Of course. Here is an extremely verbose `dbt` schema file in YAML format.
 
-This file is structured to be used as a `models/schema.yml` file within a dbt project. It defines each of the cleaned-up queries as a `dbt` model. Each model entry includes:
 * A detailed, multi-line description of its purpose and business logic.
 * The complete, cleaned SQL query embedded in a markdown code block, which your knowledge base can parse.
 * A comprehensive definition for each column, including descriptions and recommended tests.
